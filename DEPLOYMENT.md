@@ -267,6 +267,26 @@ instance payante (Render, Railway…), à un VPS
 ([section 2](#2-serveur-linux--postgresql--nginx-production)) ou à Docker
 ([section 3](#3-docker)).
 
+### 4.4 Vitrine Streamlit (Streamlit Community Cloud)
+
+La vitrine `streamlit_app.py` (lecture seule, base de démonstration embarquée)
+se déploie gratuitement sur Streamlit Community Cloud, sans serveur à gérer :
+
+1. Se connecter sur <https://share.streamlit.io> avec le compte GitHub
+   (autoriser l'accès au dépôt — public ou privé).
+2. « Create app » → « Deploy a public app from GitHub » :
+   - **Repository** : `Asma337safa/CarbonLedger-AI` ;
+   - **Branch** : `main` ;
+   - **Main file path** : `streamlit_app.py`.
+3. « Deploy ». Streamlit installe `requirements.txt` puis publie l'application
+   sur `https://<nom>.streamlit.app` — partageable par simple lien, sans compte.
+
+Limites : application **publique** (pas d'authentification), lecture seule,
+redémarrages sans état (la base embarquée est rechargée telle quelle). Pour lire
+une vraie base PostgreSQL à la place, renseigner le secret
+`CARBONLEDGER_DATABASE_URL` dans les paramètres de l'app (Secrets) : la vitrine
+lit alors les données réelles, toujours en lecture seule.
+
 ---
 
 ## 5. Exploitation courante

@@ -1,0 +1,14 @@
+# Thème CarbonLedger AI pour la vitrine Streamlit (streamlit_app.py).
+# Couleurs de la charte : vert profond #176B4D, encre #172B4D, fond #F8FAF9.
+[theme]
+primaryColor = "#176B4D"
+backgroundColor = "#F8FAF9"
+secondaryBackgroundColor = "#FFFFFF"
+textColor = "#172B4D"
+
+[browser]
+gatherUsageStats = false
+
+[client]
+# Barre d'outils minimale : interface propre pour une démonstration publique.
+toolbarMode = "minimal"

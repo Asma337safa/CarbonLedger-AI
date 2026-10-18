@@ -66,10 +66,25 @@ l'application avec des données complètes.
 > chiffré du cahier des charges). Toutes ces lignes portent un badge
 > « Démonstration » et se suppriment en un clic depuis **Paramètres → Données**.
 
+### Vitrine Streamlit (démonstration en ligne)
+
+Le dépôt contient aussi une **vitrine Streamlit** (`streamlit_app.py`) : tableau
+de bord, dépenses, registre carbone, **comparateur de décisions** et simulations,
+sur le jeu de démonstration embarqué (`streamlit_demo.db`, en lecture seule).
+Elle réutilise **le même moteur de calcul** que l'application (`app/calc`,
+`app/services`) : aucun chiffre n'est recalculé ailleurs.
+
+```bash
+streamlit run streamlit_app.py       # http://127.0.0.1:8501
+```
+
+Déploiement gratuit sur Streamlit Community Cloud : voir
+[DEPLOYMENT.md § 4.4](DEPLOYMENT.md#44-vitrine-streamlit-streamlit-community-cloud).
+
 ### Vérifier l'installation
 
 ```bash
-pytest                       # 109 tests : calculs, décisions, API, isolation, sécurité
+pytest                       # 112 tests : calculs, décisions, API, isolation, sécurité, vitrine Streamlit
 python scripts/dump_schema.py            # régénère docs/schema.sql
 alembic upgrade head                     # applique les migrations
 alembic check                            # vérifie que le schéma correspond aux modèles
@@ -192,8 +207,11 @@ app/
   models.py        15 entités SQLAlchemy
   main.py          application FastAPI (CSRF, en-têtes de sécurité, erreurs)
 alembic/           migrations de schéma
+streamlit_app.py   vitrine Streamlit (lecture seule), déployable sur Streamlit Cloud
+streamlit_demo.db  base de démonstration embarquée de la vitrine
+.streamlit/        thème Streamlit (charte CarbonLedger)
 scripts/           init_db.py, seed_demo.py, dump_schema.py
-tests/             109 tests (calculs, décision, arbitrage, imports, web, sécurité)
+tests/             112 tests (calculs, décision, arbitrage, imports, web, sécurité)
 docs/              CALCULS.md, DATABASE.md, schema.sql
 ```
 

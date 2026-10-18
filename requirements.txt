@@ -10,3 +10,7 @@ openpyxl>=3.1
 httpx>=0.27
 pytest>=8.0
 alembic>=1.13
+
+# Vitrine Streamlit (streamlit_app.py), déployée sur Streamlit Community Cloud.
+# Déclarée ici car Streamlit Cloud n'installe que le requirements.txt de la racine.
+streamlit>=1.36
