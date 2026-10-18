@@ -8,7 +8,7 @@ Légende : ✅ **Fait** (implémenté et couvert par des tests ou vérifié dans
 l'application) · 🟡 **Partiel** (fonctionne, mais avec une réserve explicite) ·
 ⛔ **Non fait** (assumé, avec la raison).
 
-Dernière mise à jour : octobre 2026. Vérifications : `pytest` → **112 tests
+Dernière mise à jour : octobre 2026. Vérifications : `pytest` → **115 tests
 passés** ; script de bout en bout → **43 vérifications passées** (inscription,
 démonstration, 8 sections, comparateur, APIs, rapports, copilot, export).
 
@@ -185,7 +185,7 @@ compromis, pondère selon la priorité, et explique chaque classement.
 | Tests de l'exemple chiffré du cahier des charges | ✅ | 200 000 / 180 000 / 25 t / −800 DH/t / payback 2,143 ans |
 | Tests d'intégration web (inscription → import → décision → rapport) | ✅ | `tests/test_web_flow.py` |
 | Tests de sécurité (CSRF, rôles, isolation, sessions) | ✅ | `tests/test_security.py` |
-| **Total** | ✅ | **112 tests, 0 avertissement** — commande dans le [README](README.md#vérifier-linstallation) |
+| **Total** | ✅ | **115 tests, 0 avertissement** — commande dans le [README](README.md#vérifier-linstallation) |
 
 ## 12. Sécurité
 
@@ -230,10 +230,10 @@ compromis, pondère selon la priorité, et explique chaque classement.
 | Schéma de base + migrations | ✅ | `docs/schema.sql`, `docs/DATABASE.md`, Alembic (`alembic upgrade head`), `alembic check` propre |
 | `.env.example` documenté | ✅ | 11 variables commentées |
 | Jeu de données de démonstration | ✅ | `scripts/seed_demo.py` + chargement intégré |
-| Tests de calcul | ✅ | `tests/` (112 tests) |
+| Tests de calcul | ✅ | `tests/` (115 tests) |
 | README | ✅ | installation, configuration, formules, API, sécurité, limites |
 | Instructions de déploiement | ✅ | [DEPLOYMENT.md](DEPLOYMENT.md) : local, Linux + PostgreSQL + Nginx + systemd, Docker, sauvegardes, Streamlit Community Cloud |
-| Vitrine Streamlit (démo publique) | ✅ | `streamlit_app.py` + `streamlit_demo.db` — mêmes moteurs de calcul, lecture seule |
+| Application Streamlit (démo publique) | ✅ | `streamlit_app.py` — accueil, inscription, connexion, espaces isolés par entreprise, mêmes moteurs de calcul ; démonstration chargée sur demande |
 | Liste d'état des fonctionnalités | ✅ | ce document |
 
 ## 16. Limites assumées et hors périmètre

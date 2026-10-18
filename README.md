@@ -66,25 +66,30 @@ l'application avec des données complètes.
 > chiffré du cahier des charges). Toutes ces lignes portent un badge
 > « Démonstration » et se suppriment en un clic depuis **Paramètres → Données**.
 
-### Vitrine Streamlit (démonstration en ligne)
+### Application Streamlit (comptes, espaces isolés)
 
-Le dépôt contient aussi une **vitrine Streamlit** (`streamlit_app.py`) : tableau
-de bord, dépenses, registre carbone, **comparateur de décisions** et simulations,
-sur le jeu de démonstration embarqué (`streamlit_demo.db`, en lecture seule).
-Elle réutilise **le même moteur de calcul** que l'application (`app/calc`,
-`app/services`) : aucun chiffre n'est recalculé ailleurs.
+Le dépôt contient aussi **`streamlit_app.py`**, l'application complète pour
+Streamlit Community Cloud : page d'accueil, **inscription et connexion**,
+un espace par entreprise (données enregistrées et isolées), tableau de bord,
+dépenses, registre carbone, **comparateur de décisions** et simulations.
+
+Un nouvel utilisateur démarre avec un **espace vide** : le jeu de démonstration
+ne se charge que sur action volontaire (tableau de bord ou paramètres) et se
+supprime en un clic. La couche métier est celle de l'application
+(`app/calc`, `app/services`, `app/models`, mots de passe scrypt) : aucun
+chiffre n'est recalculé ailleurs.
 
 ```bash
 streamlit run streamlit_app.py       # http://127.0.0.1:8501
 ```
 
 Déploiement gratuit sur Streamlit Community Cloud : voir
-[DEPLOYMENT.md § 4.4](DEPLOYMENT.md#44-vitrine-streamlit-streamlit-community-cloud).
+[DEPLOYMENT.md § 4.4](DEPLOYMENT.md#44-application-streamlit-streamlit-community-cloud).
 
 ### Vérifier l'installation
 
 ```bash
-pytest                       # 112 tests : calculs, décisions, API, isolation, sécurité, vitrine Streamlit
+pytest                       # 115 tests : calculs, décisions, API, isolation, sécurité, application Streamlit
 python scripts/dump_schema.py            # régénère docs/schema.sql
 alembic upgrade head                     # applique les migrations
 alembic check                            # vérifie que le schéma correspond aux modèles
@@ -207,11 +212,10 @@ app/
   models.py        15 entités SQLAlchemy
   main.py          application FastAPI (CSRF, en-têtes de sécurité, erreurs)
 alembic/           migrations de schéma
-streamlit_app.py   vitrine Streamlit (lecture seule), déployable sur Streamlit Cloud
-streamlit_demo.db  base de démonstration embarquée de la vitrine
+streamlit_app.py   application Streamlit (comptes, espaces isolés), déployable sur Streamlit Cloud
 .streamlit/        thème Streamlit (charte CarbonLedger)
 scripts/           init_db.py, seed_demo.py, dump_schema.py
-tests/             112 tests (calculs, décision, arbitrage, imports, web, sécurité)
+tests/             115 tests (calculs, décision, arbitrage, imports, web, sécurité, Streamlit)
 docs/              CALCULS.md, DATABASE.md, schema.sql
 ```
 

@@ -5,8 +5,6 @@ __pycache__/
 data/*.db
 data/*.db-wal
 data/*.db-shm
-streamlit_demo.db-wal
-streamlit_demo.db-shm
 data/uploads/
 data/reports/
 .pytest_cache/

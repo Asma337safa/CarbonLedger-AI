@@ -267,10 +267,12 @@ instance payante (Render, Railway…), à un VPS
 ([section 2](#2-serveur-linux--postgresql--nginx-production)) ou à Docker
 ([section 3](#3-docker)).
 
-### 4.4 Vitrine Streamlit (Streamlit Community Cloud)
+### 4.4 Application Streamlit (Streamlit Community Cloud)
 
-La vitrine `streamlit_app.py` (lecture seule, base de démonstration embarquée)
-se déploie gratuitement sur Streamlit Community Cloud, sans serveur à gérer :
+`streamlit_app.py` est l'application complète pour Streamlit Community Cloud :
+accueil, inscription, connexion, **un espace par entreprise** (données
+enregistrées et isolées), dépenses, comptabilité carbone, comparateur de
+décisions et simulations. Aucune configuration n'est nécessaire pour démarrer.
 
 1. Se connecter sur <https://share.streamlit.io> avec le compte GitHub
    (autoriser l'accès au dépôt — public ou privé).
@@ -279,13 +281,17 @@ se déploie gratuitement sur Streamlit Community Cloud, sans serveur à gérer :
    - **Branch** : `main` ;
    - **Main file path** : `streamlit_app.py`.
 3. « Deploy ». Streamlit installe `requirements.txt` puis publie l'application
-   sur `https://<nom>.streamlit.app` — partageable par simple lien, sans compte.
+   sur `https://<nom>.streamlit.app` — partageable par simple lien.
 
-Limites : application **publique** (pas d'authentification), lecture seule,
-redémarrages sans état (la base embarquée est rechargée telle quelle). Pour lire
-une vraie base PostgreSQL à la place, renseigner le secret
-`CARBONLEDGER_DATABASE_URL` dans les paramètres de l'app (Secrets) : la vitrine
-lit alors les données réelles, toujours en lecture seule.
+**Stockage des données.** Par défaut, l'application utilise une base SQLite
+locale (créée automatiquement dans le conteneur) : les comptes et les données
+y sont conservés pendant la vie du conteneur, mais peuvent être réinitialisés
+lors d'un redémarrage ou d'un redéploiement. Pour une **conservation
+permanente**, renseigner le secret `CARBONLEDGER_DATABASE_URL` (PostgreSQL,
+par ex. Neon — voir § 4.1) dans « Settings → Secrets » de l'app : le schéma
+est créé automatiquement au premier démarrage. Ce secret peut viser la même
+base que le service Render (§ 4.2) : les deux interfaces partagent alors les
+mêmes comptes et les mêmes données.
 
 ---
 
