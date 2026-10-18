@@ -272,7 +272,9 @@ instance payante (Render, Railway…), à un VPS
 `streamlit_app.py` est l'application complète pour Streamlit Community Cloud :
 accueil, inscription, connexion, **un espace par entreprise** (données
 enregistrées et isolées), dépenses, comptabilité carbone, comparateur de
-décisions et simulations. Aucune configuration n'est nécessaire pour démarrer.
+décisions, simulations, **imports de fichiers CSV/Excel**, **rapports
+PDF/Excel téléchargeables** et **assistant IA**. Aucune configuration n'est
+nécessaire pour démarrer ; les trois options ci-dessous sont facultatives.
 
 1. Se connecter sur <https://share.streamlit.io> avec le compte GitHub
    (autoriser l'accès au dépôt — public ou privé).
@@ -292,6 +294,20 @@ par ex. Neon — voir § 4.1) dans « Settings → Secrets » de l'app : le sch�
 est créé automatiquement au premier démarrage. Ce secret peut viser la même
 base que le service Render (§ 4.2) : les deux interfaces partagent alors les
 mêmes comptes et les mêmes données.
+
+**Assistant IA (facultatif).** Ajouter le secret `CARBONLEDGER_AI_API_KEY`
+(clé d'une API compatible OpenAI) pour activer l'assistant IA génératif ;
+`CARBONLEDGER_AI_BASE_URL` et `CARBONLEDGER_AI_MODEL` permettent de viser un
+autre fournisseur (Azure, Mistral, Ollama…). Sans clé, l'assistant reste
+utilisable en **mode démonstration** : réponses calculées localement à partir
+des données réelles, aucun appel réseau.
+
+**Rapports générés.** Les PDF et classeurs Excel sont écrits dans
+`data/reports/<organisation>/` (dans le conteneur) et téléchargeables depuis
+la page « Rapports », avec leur historique (téléchargement, suppression).
+Après un redémarrage du conteneur, les fichiers générés disparaissent : les
+regénérer depuis la page « Rapports » (l'historique en base, lui, est
+conservé si `CARBONLEDGER_DATABASE_URL` est configurée).
 
 ---
 

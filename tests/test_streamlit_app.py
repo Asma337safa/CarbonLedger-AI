@@ -12,6 +12,10 @@ couverts :
 - la démonstration ne se charge que sur action volontaire depuis les
   paramètres ;
 - le comparateur reproduit l'exemple du cahier des charges ;
+- l'import d'un fichier CSV suit les quatre étapes (analyse, correspondance,
+  vérification, confirmation) et crée les dépenses ;
+- les rapports se génèrent en PDF (période et projet) et en Excel ;
+- l'assistant IA répond en mode démonstration, à partir des données réelles ;
 - toutes les pages s'affichent sans exception.
 """
 
@@ -30,9 +34,12 @@ APP = ROOT / "streamlit_app.py"
 PAGES = [
     "Tableau de bord",
     "Dépenses",
+    "Imports",
     "Comptabilité carbone",
     "Comparateur de décisions",
     "Simulations",
+    "Rapports",
+    "Assistant IA",
     "Paramètres",
 ]
 
@@ -211,3 +218,107 @@ def test_toutes_les_pages_s_affichent_sans_exception() -> None:
     for page in PAGES:
         _aller_a(instance, page)
         assert not instance.exception, f"Page en erreur : {page}"
+
+
+def test_import_csv_de_bout_en_bout() -> None:
+    instance = _spawn()
+    _inscrire(instance, _suffixe())
+    _aller_a(instance, "Imports")
+    assert "Imports de fichiers" in _texte(instance)
+
+    contenu = (
+        "Date;Fournisseur;Description;Montant HT;TVA\n"
+        "15/03/2026;Fournil Atlas;Farine et emballages;1000;200\n"
+        "10/04/2026;Energie Casa;Electricite atelier;2500;500\n"
+    )
+    instance.file_uploader(key="imp_file").set_value(
+        ("depenses_test.csv", contenu.encode("utf-8"), "text/csv")
+    ).run()
+    assert not instance.exception, f"Erreur à l'analyse du fichier : {instance.exception}"
+    text = _texte(instance)
+    assert "Fichier analysé" in text
+    assert "2 ligne(s) détectée(s)" in text
+    assert "Correspondance des colonnes" in text
+
+    instance.button(key="imp_validate").click().run()
+    assert not instance.exception, f"Erreur à la vérification : {instance.exception}"
+    assert "Prêtes à importer" in _texte(instance)
+
+    instance.button(key="imp_confirm").click().run()
+    assert not instance.exception, f"Erreur à la confirmation : {instance.exception}"
+    assert "Importation terminée" in _texte(instance)
+
+    # Les deux lignes confirmées apparaissent dans les dépenses de l'espace.
+    _aller_a(instance, "Dépenses")
+    text = _texte(instance)
+    assert "1 000,00" in text
+    assert "2 500,00" in text
+    assert "3 500,00" in text  # total HT des lignes importées
+
+
+def test_rapports_pdf_excel_et_projet() -> None:
+    instance = _spawn()
+    _inscrire(instance, _suffixe())
+    instance.button(key="dash_load_demo").click().run()
+    assert not instance.exception, f"Erreur au chargement de la démo : {instance.exception}"
+
+    _aller_a(instance, "Rapports")
+    text = _texte(instance)
+    assert "Rapports et exports" in text
+    assert "136" in text  # aperçu du contenu : total HT du jeu de démonstration
+
+    # Rapport PDF de gestion sur l'année en cours.
+    instance.button(key="rep_generate").click().run()
+    assert not instance.exception, f"Erreur à la génération du PDF : {instance.exception}"
+    telechargement = instance.session_state["rep_download"]
+    assert telechargement["data"][:4] == b"%PDF"
+    assert telechargement["name"].endswith(".pdf")
+    assert instance.download_button, "le bouton de téléchargement doit être proposé"
+
+    # Export Excel (trois feuilles) de tout l'historique.
+    instance.radio(key="rep_output").set_value("Excel (export des données)").run()
+    assert not instance.exception
+    instance.button(key="rep_generate").click().run()
+    assert not instance.exception, f"Erreur à l'export Excel : {instance.exception}"
+    telechargement = instance.session_state["rep_download"]
+    assert telechargement["data"][:2] == b"PK"  # classeur openpyxl (archive zip)
+    assert telechargement["name"].endswith(".xlsx")
+
+    # Rapport PDF d'un projet de décision (le premier projet de démonstration).
+    instance.radio(key="rep_scope").set_value("Projet de décision").run()
+    assert not instance.exception
+    instance.button(key="rep_generate_project").click().run()
+    assert not instance.exception, f"Erreur au rapport de projet : {instance.exception}"
+    telechargement = instance.session_state["rep_download"]
+    assert telechargement["data"][:4] == b"%PDF"
+    assert "Rapport de décision" in telechargement["label"]
+
+
+def test_assistant_ia_en_mode_demonstration() -> None:
+    instance = _spawn()
+    _inscrire(instance, _suffixe())
+    _aller_a(instance, "Assistant IA")
+    text = _texte(instance)
+    assert "Mode démonstration" in text
+    assert "Questions suggérées" in text
+
+    # Espace vide : l'assistant répond sans inventer de chiffre.
+    instance.chat_input(key="cop_input").set_value("Quel est le total de mes dépenses ?").run()
+    assert not instance.exception, f"Erreur de l'assistant : {instance.exception}"
+    historique = instance.session_state["cop_history"]
+    assert len(historique) == 2
+    assert historique[0]["role"] == "user"
+    assert historique[1]["role"] == "assistant"
+    assert "Mode démonstration" in historique[1]["meta"]
+    assert "DH" in historique[1]["content"]
+
+    # Avec le jeu de démonstration, la réponse cite les montants réels.
+    _aller_a(instance, "Tableau de bord")
+    instance.button(key="dash_load_demo").click().run()
+    assert not instance.exception
+    _aller_a(instance, "Assistant IA")
+    instance.chat_input(key="cop_input").set_value("Quel est le total de mes dépenses ?").run()
+    assert not instance.exception
+    historique = instance.session_state["cop_history"]
+    assert len(historique) == 4
+    assert "136" in historique[3]["content"]  # 136 560,00 DH HT du jeu de démonstration

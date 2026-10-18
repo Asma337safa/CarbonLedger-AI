@@ -20,12 +20,16 @@ from decimal import Decimal
 from pathlib import Path
 from typing import Any
 
+from sqlalchemy import select
+from sqlalchemy.orm import Session as OrmSession
+
 from ..calc.dashboard import parse_date
 from ..calc.emissions import compute_emissions_kg, status_from_method
 from ..calc.formatting import to_decimal
 from ..calc.units import are_compatible, canonical_unit, convert
 from ..enums import EXPENSE_CATEGORIES, VERIFICATION_STATUSES
 from ..errors import ValidationError
+from ..models import CarbonRecord, EmissionFactor, Expense
 
 # Champ de l'application -> (libellé, obligatoire, aide)
 APP_FIELDS: dict[str, tuple[str, bool, str]] = {
@@ -531,3 +535,105 @@ def duplicate_keys_for_expenses(expenses) -> set[str]:
         except Exception:  # pragma: no cover - défensif
             continue
     return keys
+
+
+# ---------------------------------------------------------------------------
+# Étapes côté base : validation d'un lot et création des dépenses
+# ---------------------------------------------------------------------------
+def factors_lookup(db: OrmSession, organization_id: int) -> dict[str, Any]:
+    """Facteurs disponibles : catalogue global + facteurs propres à l'organisation."""
+    factors = (
+        db.execute(
+            select(EmissionFactor).where(
+                (EmissionFactor.organization_id.is_(None)) | (EmissionFactor.organization_id == organization_id)
+            )
+        )
+        .scalars()
+        .all()
+    )
+    mapping: dict[str, Any] = {}
+    for factor in factors:
+        mapping[factor.code] = factor
+        mapping[factor.code.lower()] = factor
+    return mapping
+
+
+def validate_batch(
+    db: OrmSession,
+    batch: Any,
+    mapping: dict[str, str],
+    *,
+    include_duplicates: bool = False,
+) -> ValidationReport:
+    """Relit le fichier du lot et renvoie le rapport de validation complet.
+
+    Partagé par l'assistant d'importation web et l'application Streamlit :
+    mêmes règles, mêmes messages, mêmes doublons détectés.
+    """
+    parsed = parse_file(Path(batch.stored_path), batch.filename)
+    factors = factors_lookup(db, batch.organization_id)
+    existing = (
+        db.execute(select(Expense).where(Expense.organization_id == batch.organization_id)).scalars().all()
+    )
+    existing_keys = duplicate_keys_for_expenses(existing)
+    return validate_rows(parsed, mapping, factors, existing_keys, include_duplicates=include_duplicates)
+
+
+def create_expenses_from_report(
+    db: OrmSession,
+    *,
+    organization_id: int,
+    user_id: int,
+    report: ValidationReport,
+    batch_filename: str,
+) -> tuple[int, int]:
+    """Crée les dépenses validées et leurs estimations carbone associées.
+
+    Renvoie ``(dépenses créées, estimations carbone créées)``. Aucune ligne
+    n'est reprise sans avoir passé l'étape de validation.
+    """
+    created = 0
+    carbon_created = 0
+    for row in report.rows:
+        expense = Expense(
+            organization_id=organization_id,
+            expense_date=row["expense_date"],
+            category=row["category"] if row["category"] in EXPENSE_CATEGORIES else "autres",
+            supplier=row["supplier"],
+            description=row["description"] or f"Import {batch_filename} (ligne {row['line']})",
+            amount_ht=row["amount_ht"],
+            vat_amount=row["vat_amount"],
+            amount_ttc=row["amount_ttc"],
+            quantity=row["quantity"],
+            unit=row["unit"],
+            emission_factor_id=row["factor_id"],
+            carbon_source_note=row["carbon_source"] or "Carbone non estimé : données insuffisantes à l'import.",
+            verification_status=row["verification_status"] if row["verification_status"] in VERIFICATION_STATUSES else "a_verifier",
+            is_demo=False,
+            created_by_id=user_id,
+        )
+        db.add(expense)
+        db.flush()
+        created += 1
+        if row["carbon_kg"] is not None:
+            db.add(
+                CarbonRecord(
+                    organization_id=organization_id,
+                    expense_id=expense.id,
+                    category=row["category"],
+                    period_start=row["expense_date"].replace(day=1),
+                    period_end=row["expense_date"],
+                    activity_quantity=row["carbon_quantity_base"] or (row["quantity"] or Decimal("0")),
+                    activity_unit=row["carbon_unit_base"] or (row["unit"] or ""),
+                    emission_factor_id=row["factor_id"],
+                    method=row["carbon_method"] or "estime",
+                    kgco2e=row["carbon_kg"],
+                    status=row["carbon_status"] or status_from_method(row["carbon_method"] or "estime"),
+                    confidence=row["carbon_confidence"] or "faible",
+                    notes=f"Import « {batch_filename} » (ligne {row['line']}). "
+                          + (f"Source : {row['carbon_source']}." if row["carbon_source"] else ""),
+                    is_demo=False,
+                )
+            )
+            carbon_created += 1
+    return created, carbon_created

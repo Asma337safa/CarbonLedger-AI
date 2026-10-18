@@ -71,7 +71,11 @@ l'application avec des données complètes.
 Le dépôt contient aussi **`streamlit_app.py`**, l'application complète pour
 Streamlit Community Cloud : page d'accueil, **inscription et connexion**,
 un espace par entreprise (données enregistrées et isolées), tableau de bord,
-dépenses, registre carbone, **comparateur de décisions** et simulations.
+dépenses, **imports de fichiers CSV/Excel** (aperçu, correspondance des
+colonnes, vérification, confirmation), registre carbone, **comparateur de
+décisions**, simulations, **rapports PDF/Excel avec téléchargement** et
+**assistant IA** (mode démonstration calculé localement, ou IA générative si
+une clé d'API est configurée).
 
 Un nouvel utilisateur démarre avec un **espace vide** : le jeu de démonstration
 ne se charge que sur action volontaire (tableau de bord ou paramètres) et se
@@ -89,7 +93,7 @@ Déploiement gratuit sur Streamlit Community Cloud : voir
 ### Vérifier l'installation
 
 ```bash
-pytest                       # 115 tests : calculs, décisions, API, isolation, sécurité, application Streamlit
+pytest                       # 121 tests : calculs, décisions, API, isolation, sécurité, application Streamlit
 python scripts/dump_schema.py            # régénère docs/schema.sql
 alembic upgrade head                     # applique les migrations
 alembic check                            # vérifie que le schéma correspond aux modèles
@@ -212,10 +216,10 @@ app/
   models.py        15 entités SQLAlchemy
   main.py          application FastAPI (CSRF, en-têtes de sécurité, erreurs)
 alembic/           migrations de schéma
-streamlit_app.py   application Streamlit (comptes, espaces isolés), déployable sur Streamlit Cloud
+streamlit_app.py   application Streamlit (comptes, espaces isolés, imports, rapports, assistant IA), déployable sur Streamlit Cloud
 .streamlit/        thème Streamlit (charte CarbonLedger)
 scripts/           init_db.py, seed_demo.py, dump_schema.py
-tests/             115 tests (calculs, décision, arbitrage, imports, web, sécurité, Streamlit)
+tests/             121 tests (calculs, décision, arbitrage, imports, web, sécurité, Streamlit)
 docs/              CALCULS.md, DATABASE.md, schema.sql
 ```
 

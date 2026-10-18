@@ -8,32 +8,28 @@ colonnes, vérification puis confirmation.
 from __future__ import annotations
 
 import json
-from datetime import date
-from decimal import Decimal
 from pathlib import Path
 
 from fastapi import APIRouter, Depends, File, Request, UploadFile
-from fastapi.responses import JSONResponse, RedirectResponse, StreamingResponse
+from fastapi.responses import JSONResponse, StreamingResponse
 from sqlalchemy import select
 from sqlalchemy.orm import Session as OrmSession
 
-from ..calc.emissions import status_from_method
-from ..calc.formatting import to_decimal
 from ..config import ALLOWED_UPLOAD_EXTENSIONS, settings
 from ..db import get_db
 from ..deps import flash, get_scoped, require_api_context, require_context, require_write
-from ..enums import EXPENSE_CATEGORIES, VERIFICATION_STATUSES
-from ..errors import AppError, NotFoundError, ValidationError
-from ..models import CarbonRecord, EmissionFactor, Expense, ImportBatch
+from ..enums import EXPENSE_CATEGORIES
+from ..errors import AppError, NotFoundError
+from ..models import ImportBatch
 from ..security import new_token
 from ..services import audit
 from ..services.import_service import (
     APP_FIELDS,
-    duplicate_keys_for_expenses,
+    create_expenses_from_report,
     parse_file,
     rows_to_csv,
     suggest_mapping,
-    validate_rows,
+    validate_batch,
 )
 from ..web import page_context, render
 
@@ -43,23 +39,6 @@ api_router = APIRouter(prefix="/api/imports")
 
 def _json_error(message: str, status_code: int = 400) -> JSONResponse:
     return JSONResponse({"ok": False, "error": message}, status_code=status_code)
-
-
-def _factors_by_code(db: OrmSession, organization_id: int) -> dict[str, EmissionFactor]:
-    factors = (
-        db.execute(
-            select(EmissionFactor).where(
-                (EmissionFactor.organization_id.is_(None)) | (EmissionFactor.organization_id == organization_id)
-            )
-        )
-        .scalars()
-        .all()
-    )
-    mapping: dict[str, EmissionFactor] = {}
-    for factor in factors:
-        mapping[factor.code] = factor
-        mapping[factor.code.lower()] = factor
-    return mapping
 
 
 # ---------------------------------------------------------------------------
@@ -194,15 +173,6 @@ def _load_batch(db: OrmSession, batch_id: int, organization_id: int) -> ImportBa
     return batch
 
 
-def _run_validation(db: OrmSession, batch: ImportBatch, organization_id: int, mapping: dict[str, str], include_duplicates: bool):
-    parsed = parse_file(Path(batch.stored_path), batch.filename)
-    factors = _factors_by_code(db, organization_id)
-    existing = db.execute(select(Expense).where(Expense.organization_id == organization_id)).scalars().all()
-    existing_keys = duplicate_keys_for_expenses(existing)
-    report = validate_rows(parsed, mapping, factors, existing_keys, include_duplicates=include_duplicates)
-    return report
-
-
 @api_router.post("/{batch_id}/mapping")
 async def apply_mapping(batch_id: int, request: Request, db: OrmSession = Depends(get_db)):
     context = require_api_context(request, db)
@@ -212,7 +182,7 @@ async def apply_mapping(batch_id: int, request: Request, db: OrmSession = Depend
     include_duplicates = bool(payload.get("include_duplicates"))
     try:
         batch = _load_batch(db, batch_id, context.organization.id)
-        report = _run_validation(db, batch, context.organization.id, mapping, include_duplicates)
+        report = validate_batch(db, batch, mapping, include_duplicates=include_duplicates)
     except AppError as exc:
         return _json_error(exc.message)
     batch.mapping = {"mapping": mapping, "include_duplicates": include_duplicates}
@@ -251,7 +221,7 @@ def download_errors(batch_id: int, request: Request, db: OrmSession = Depends(ge
     stored_mapping = (batch.mapping or {}).get("mapping") or {}
     include_duplicates = bool((batch.mapping or {}).get("include_duplicates"))
     try:
-        report = _run_validation(db, batch, context.organization.id, stored_mapping, include_duplicates)
+        report = validate_batch(db, batch, stored_mapping, include_duplicates=include_duplicates)
     except AppError as exc:
         raise exc
     content = rows_to_csv(report.issues)
@@ -274,54 +244,17 @@ async def confirm_import(batch_id: int, request: Request, db: OrmSession = Depen
         include_duplicates = bool(payload.get("include_duplicates", (batch.mapping or {}).get("include_duplicates")))
         if not mapping:
             return _json_error("Aucune correspondance de colonnes enregistrée : relancez l'étape 3.")
-        report = _run_validation(db, batch, context.organization.id, mapping, include_duplicates)
+        report = validate_batch(db, batch, mapping, include_duplicates=include_duplicates)
     except AppError as exc:
         return _json_error(exc.message)
 
-    created = 0
-    carbon_created = 0
-    for row in report.rows:
-        expense = Expense(
-            organization_id=context.organization.id,
-            expense_date=row["expense_date"],
-            category=row["category"] if row["category"] in EXPENSE_CATEGORIES else "autres",
-            supplier=row["supplier"],
-            description=row["description"] or f"Import {batch.filename} (ligne {row['line']})",
-            amount_ht=row["amount_ht"],
-            vat_amount=row["vat_amount"],
-            amount_ttc=row["amount_ttc"],
-            quantity=row["quantity"],
-            unit=row["unit"],
-            emission_factor_id=row["factor_id"],
-            carbon_source_note=row["carbon_source"] or "Carbone non estimé : données insuffisantes à l'import.",
-            verification_status=row["verification_status"] if row["verification_status"] in VERIFICATION_STATUSES else "a_verifier",
-            is_demo=False,
-            created_by_id=context.user.id,
-        )
-        db.add(expense)
-        db.flush()
-        created += 1
-        if row["carbon_kg"] is not None:
-            db.add(
-                CarbonRecord(
-                    organization_id=context.organization.id,
-                    expense_id=expense.id,
-                    category=row["category"],
-                    period_start=row["expense_date"].replace(day=1),
-                    period_end=row["expense_date"],
-                    activity_quantity=row["carbon_quantity_base"] or (row["quantity"] or Decimal("0")),
-                    activity_unit=row["carbon_unit_base"] or (row["unit"] or ""),
-                    emission_factor_id=row["factor_id"],
-                    method=row["carbon_method"] or "estime",
-                    kgco2e=row["carbon_kg"],
-                    status=row["carbon_status"] or status_from_method(row["carbon_method"] or "estime"),
-                    confidence=row["carbon_confidence"] or "faible",
-                    notes=f"Import « {batch.filename} » (ligne {row['line']}). "
-                          + (f"Source : {row['carbon_source']}." if row["carbon_source"] else ""),
-                    is_demo=False,
-                )
-            )
-            carbon_created += 1
+    created, carbon_created = create_expenses_from_report(
+        db,
+        organization_id=context.organization.id,
+        user_id=context.user.id,
+        report=report,
+        batch_filename=batch.filename,
+    )
 
     batch.status = "importe"
     batch.summary = {**(batch.summary or {}), "imported": created, "carbon_created": carbon_created, "stats": report.stats}

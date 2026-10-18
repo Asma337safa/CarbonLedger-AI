@@ -3,8 +3,10 @@
 Application complète sur Streamlit Community Cloud : page d'accueil, création
 de compte, connexion, **un espace par entreprise** (données enregistrées en
 base et isolées par organisation), page de paramètres et fonctionnalités de
-pilotage : tableau de bord, dépenses, comptabilité carbone, comparateur de
-décisions et simulations.
+pilotage : tableau de bord, dépenses, **imports de fichiers CSV/Excel**,
+comptabilité carbone, comparateur de décisions, simulations,
+**rapports PDF/Excel** et **assistant IA** (mode IA optionnel, sinon réponses
+calculées localement sur les données réelles).
 
 Principe : **aucun chiffre n'est recalculé à la main ici**. L'application
 réutilise la couche métier de l'application FastAPI (dossier ``app/`` :
@@ -54,9 +56,16 @@ def _streamlit_secret(name: str) -> str:
     return str(value or "")
 
 
-# Le secret éventuel doit être posé AVANT l'import de la configuration.
-if _streamlit_secret("CARBONLEDGER_DATABASE_URL"):
-    os.environ.setdefault("CARBONLEDGER_DATABASE_URL", _streamlit_secret("CARBONLEDGER_DATABASE_URL"))
+# Les secrets éventuels doivent être posés AVANT l'import de la configuration.
+for _secret_name in (
+    "CARBONLEDGER_DATABASE_URL",
+    "CARBONLEDGER_AI_API_KEY",
+    "CARBONLEDGER_AI_BASE_URL",
+    "CARBONLEDGER_AI_MODEL",
+):
+    _secret_value = _streamlit_secret(_secret_name)
+    if _secret_value:
+        os.environ.setdefault(_secret_name, _secret_value)
 
 ROOT = Path(__file__).resolve().parent
 if str(ROOT) not in sys.path:
@@ -81,7 +90,7 @@ from app.calc.formatting import (  # noqa: E402
     fmt_tco2e,
     to_decimal,
 )
-from app.config import settings  # noqa: E402
+from app.config import ALLOWED_UPLOAD_EXTENSIONS, settings  # noqa: E402
 from app.db import init_db, is_postgres, session_scope  # noqa: E402
 from app.enums import (  # noqa: E402
     CARBON_CATEGORIES,
@@ -101,8 +110,10 @@ from app.models import (  # noqa: E402
     DecisionProject,
     EmissionFactor,
     Expense,
+    ImportBatch,
     Organization,
     OrganizationMember,
+    Report,
     User,
     utcnow,
 )
@@ -116,9 +127,24 @@ from app.security import (  # noqa: E402
 )
 from app.services import audit  # noqa: E402
 from app.services.compute import analyze, key_figures  # noqa: E402
+from app.services.copilot import SUGGESTED_QUESTIONS, ask  # noqa: E402
 from app.services.demo_data import delete_demo_data, load_demo_data  # noqa: E402
 from app.services.factors_seed import seed_global_factors  # noqa: E402
+from app.services.import_service import (  # noqa: E402
+    APP_FIELDS,
+    create_expenses_from_report,
+    parse_file,
+    rows_to_csv,
+    suggest_mapping,
+    validate_batch,
+)
 from app.services.project_service import analyze_project  # noqa: E402
+from app.services.report_build import (  # noqa: E402
+    collect_period_data,
+    export_period_excel,
+    generate_period_report,
+    generate_project_report,
+)
 
 
 @st.cache_resource(show_spinner=False)
@@ -134,12 +160,23 @@ GITHUB_URL = "https://github.com/Asma337safa/CarbonLedger-AI"
 PAGES = [
     "Tableau de bord",
     "Dépenses",
+    "Imports",
     "Comptabilité carbone",
     "Comparateur de décisions",
     "Simulations",
+    "Rapports",
+    "Assistant IA",
     "Paramètres",
 ]
 COMPANY_SIZES = ["", "1–9", "10–49", "50–249", "250+"]
+EXCEL_MIME = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+IMPORT_STATUS_LABELS = {
+    "en_attente": "En attente",
+    "previsualise": "Analysé (aperçu)",
+    "mappe": "Vérifié",
+    "importe": "Importé",
+    "echec": "Échec",
+}
 EMAIL_RE = re.compile(r"^[^@\s]+@[^@\s]+\.[A-Za-z]{2,}$")
 MAX_FAILED_LOGINS = 8
 LOCK_MINUTES = 15
@@ -775,6 +812,63 @@ def _analyze_project(project_id: int, org_id: int, priority: str, with_scenarios
             with_sensitivity=not with_scenarios,
             with_charts=True,
         )
+
+
+def _scoped_batch(db, batch_id: int, org_id: int) -> ImportBatch:
+    """Lot d'importation de l'organisation courante (double filtre de sécurité)."""
+    batch = db.get(ImportBatch, batch_id)
+    if batch is None or batch.organization_id != org_id:
+        raise ValidationError("Import introuvable : relancez l'importation depuis un fichier.")
+    return batch
+
+
+def _load_batches(org_id: int) -> list[dict]:
+    with session_scope() as db:
+        batches = (
+            db.execute(
+                select(ImportBatch)
+                .where(ImportBatch.organization_id == org_id)
+                .order_by(ImportBatch.created_at.desc())
+                .limit(10)
+            )
+            .scalars()
+            .all()
+        )
+        return [
+            {
+                "filename": batch.filename,
+                "status": batch.status,
+                "created": batch.created_at,
+                "imported": (batch.summary or {}).get("imported"),
+                "carbon_created": (batch.summary or {}).get("carbon_created"),
+            }
+            for batch in batches
+        ]
+
+
+def _load_reports(org_id: int) -> list[dict]:
+    with session_scope() as db:
+        reports = (
+            db.execute(
+                select(Report)
+                .where(Report.organization_id == org_id)
+                .order_by(Report.created_at.desc())
+                .limit(50)
+            )
+            .scalars()
+            .all()
+        )
+        return [
+            {
+                "id": report.id,
+                "title": report.title,
+                "scope": report.scope,
+                "created": report.created_at,
+                "path": report.file_path,
+                "exists": bool(report.file_path) and Path(report.file_path).exists(),
+            }
+            for report in reports
+        ]
 
 
 def _load_demo(ctx: Espace) -> None:
@@ -1827,6 +1921,568 @@ def page_simulations(ctx: Espace) -> None:
                 st.markdown(f"- {line}")
 
 
+# ---------------------------------------------------------------------------
+# Imports de fichiers (CSV / Excel)
+# ---------------------------------------------------------------------------
+def _import_start(ctx: Espace, filename: str, content: bytes, fingerprint: str) -> None:
+    """Étapes 1-2 : contrôles, stockage temporaire du fichier puis analyse."""
+    suffix = Path(filename).suffix.lower()
+    if suffix not in ALLOWED_UPLOAD_EXTENSIONS:
+        st.error(f"Extension non autorisée ({suffix or 'aucune'}). Formats acceptés : CSV, XLSX, XLSM.")
+        return
+    if not content:
+        st.error("Le fichier est vide.")
+        return
+    if len(content) > settings.max_upload_mb * 1024 * 1024:
+        st.error(
+            f"Fichier trop volumineux ({len(content) / 1024 / 1024:.1f} Mo). "
+            f"Maximum : {settings.max_upload_mb} Mo."
+        )
+        return
+    stored_name = f"{new_token(12)}{suffix}"
+    stored_path = settings.uploads_dir / stored_name
+    stored_path.write_bytes(content)
+    try:
+        parsed = parse_file(stored_path, filename)
+    except Exception as exc:
+        stored_path.unlink(missing_ok=True)
+        message = exc.message if isinstance(exc, ValidationError) else f"Fichier illisible : {type(exc).__name__}."
+        st.error(message)
+        return
+    mapping = suggest_mapping(parsed.columns)
+    with session_scope() as db:
+        batch = ImportBatch(
+            organization_id=ctx.org_id,
+            user_id=ctx.user_id,
+            filename=filename[:255],
+            stored_path=str(stored_path),
+            status="previsualise",
+            mapping={"mapping": mapping},
+            summary={"total_rows": parsed.total_rows, "columns": parsed.columns},
+        )
+        db.add(batch)
+        db.flush()
+        batch_id = batch.id
+        audit.log(
+            db,
+            action="import_uploaded",
+            organization_id=ctx.org_id,
+            user_id=ctx.user_id,
+            entity_type="import_batch",
+            entity_id=batch.id,
+            details={"fichier": filename, "lignes": parsed.total_rows},
+        )
+        db.commit()
+    st.session_state["imp_fingerprint"] = fingerprint
+    st.session_state["imp_batch_id"] = batch_id
+    st.session_state["imp_columns"] = parsed.columns
+    st.session_state["imp_suggested"] = mapping
+    st.session_state["imp_total_rows"] = parsed.total_rows
+    st.session_state["imp_warnings"] = parsed.warnings
+    # Les choix de correspondance de l'ancien fichier ne doivent pas survivre.
+    for field in APP_FIELDS:
+        st.session_state.pop(f"imp_map_{field}", None)
+    st.session_state.pop("imp_dups", None)
+    st.session_state.pop("imp_report", None)
+
+
+def page_imports(ctx: Espace) -> None:
+    st.title("Imports de fichiers")
+    st.caption(
+        "Importez vos dépenses depuis un fichier CSV ou Excel — aperçu, correspondance des colonnes, "
+        "vérification ligne par ligne, puis confirmation. Rien n'est enregistré avant votre validation finale."
+    )
+
+    uploaded = st.file_uploader(
+        "1. Choisissez votre fichier à analyser",
+        type=["csv", "xlsx", "xlsm"],
+        key="imp_file",
+        help=(
+            f"Formats : CSV, XLSX, XLSM — {settings.max_upload_mb} Mo maximum. "
+            "Les colonnes (date, fournisseur, montants, quantité, unité…) sont détectées automatiquement."
+        ),
+    )
+    if uploaded is not None:
+        content = uploaded.getvalue()
+        fingerprint = f"{uploaded.name}|{len(content)}"
+        if st.session_state.get("imp_fingerprint") != fingerprint:
+            _import_start(ctx, uploaded.name, content, fingerprint)
+
+    batch_id = st.session_state.get("imp_batch_id")
+    if not batch_id:
+        st.info(
+            "Aucun fichier en cours d'importation. Déposez un fichier ci-dessus : l'application détecte les "
+            "colonnes, signale les erreurs ligne par ligne et n'enregistre que ce que vous confirmez."
+        )
+    else:
+        columns = st.session_state.get("imp_columns") or []
+        total_rows = st.session_state.get("imp_total_rows") or 0
+        warnings = st.session_state.get("imp_warnings") or []
+        suggested = st.session_state.get("imp_suggested") or {}
+        st.markdown(
+            f'<span class="cl-badge cl-badge--demo">2. Fichier analysé — {total_rows} ligne(s) détectée(s), '
+            f"{len(columns)} colonne(s)</span>",
+            unsafe_allow_html=True,
+        )
+        for warning in warnings:
+            st.warning(warning)
+        with st.expander("Colonnes détectées dans le fichier"):
+            st.write(" · ".join(columns) if columns else "—")
+
+        st.subheader("3. Correspondance des colonnes")
+        st.caption("Vérifiez la correspondance proposée — seules les colonnes associées sont utilisées.")
+        mapping: dict[str, str] = {}
+        for field, (label, required, help_text) in APP_FIELDS.items():
+            options = ["— aucune —", *columns]
+            default = suggested.get(field, "— aucune —")
+            index = options.index(default) if default in options else 0
+            choice = st.selectbox(
+                f"{label} *" if required else label,
+                options,
+                index=index,
+                key=f"imp_map_{field}",
+                help=help_text or None,
+            )
+            if choice != "— aucune —":
+                mapping[field] = choice
+        include_duplicates = st.checkbox(
+            "Importer aussi les lignes détectées comme doublons (même date, fournisseur et montant)",
+            key="imp_dups",
+        )
+
+        if st.button("Vérifier les lignes", key="imp_validate", type="primary"):
+            try:
+                with session_scope() as db:
+                    batch = _scoped_batch(db, int(batch_id), ctx.org_id)
+                    report = validate_batch(db, batch, mapping, include_duplicates=include_duplicates)
+                    batch.mapping = {"mapping": mapping, "include_duplicates": include_duplicates}
+                    batch.status = "mappe"
+                    batch.summary = {**(batch.summary or {}), "validation": report.stats}
+                    db.commit()
+                st.session_state["imp_report"] = report
+            except Exception as exc:
+                st.error(str(getattr(exc, "message", exc)))
+                st.session_state.pop("imp_report", None)
+
+        report = st.session_state.get("imp_report")
+        if report is not None:
+            stats = report.stats
+            st.subheader("4. Vérification avant import")
+            k_cols = st.columns(6)
+            _kpi(k_cols[0], "Lignes analysées", str(stats.get("total", 0)))
+            _kpi(k_cols[1], "Prêtes à importer", str(stats.get("valid", 0)))
+            _kpi(
+                k_cols[2],
+                "Erreurs",
+                str(stats.get("errors", 0)),
+                "lignes écartées",
+                tone="rouge" if stats.get("errors") else "",
+            )
+            _kpi(k_cols[3], "Avertissements", str(stats.get("warnings", 0)))
+            _kpi(k_cols[4], "Doublons ignorés", str(stats.get("duplicates", 0)))
+            _kpi(k_cols[5], "Estimations carbone", str(stats.get("with_carbon", 0)))
+
+            issues_rows = [
+                {
+                    "Ligne": issue.row,
+                    "Niveau": "Erreur" if issue.level == "erreur" else "Avertissement",
+                    "Champ": issue.field or "—",
+                    "Message": issue.message,
+                }
+                for issue in report.issues[:200]
+            ]
+            if issues_rows:
+                st.markdown("**Problèmes détectés** — les lignes en erreur seront écartées de l'import :")
+                st.dataframe(pd.DataFrame(issues_rows), hide_index=True, use_container_width=True)
+                st.download_button(
+                    "Télécharger la liste des problèmes (CSV)",
+                    data=("\ufeff" + rows_to_csv(report.issues)).encode("utf-8"),
+                    file_name="erreurs_import.csv",
+                    mime="text/csv",
+                    key="imp_errors_csv",
+                )
+            preview_rows = [
+                {
+                    "Ligne": row["line"],
+                    "Statut": {"ok": "OK", "avertissement": "Avertissement", "erreur": "Erreur"}.get(
+                        row["status"], row["status"]
+                    ),
+                    "Date": fmt_date(row["date"]) if row["date"] else "—",
+                    "Fournisseur": row["supplier"] or "—",
+                    "Description": (row["description"] or "—")[:60],
+                    "Montant HT": fmt_money(row["amount_ht"]) if row["amount_ht"] is not None else "—",
+                    "Montant TTC": fmt_money(row["amount_ttc"]) if row["amount_ttc"] is not None else "—",
+                    "Catégorie": EXPENSE_CATEGORIES.get(row["category"], row["category"]),
+                    "kg CO₂e": fmt_kg(to_decimal(row["carbon"])) if row["carbon"] is not None else "non estimé",
+                }
+                for row in report.preview[:80]
+            ]
+            if preview_rows:
+                st.markdown("**Aperçu des lignes normalisées** :")
+                st.dataframe(pd.DataFrame(preview_rows), hide_index=True, use_container_width=True)
+
+            if st.button(
+                f"Importer définitivement {stats.get('valid', 0)} ligne(s) dans mes dépenses",
+                key="imp_confirm",
+                type="primary",
+            ):
+                mapping_confirmed = {
+                    field: st.session_state.get(f"imp_map_{field}")
+                    for field in APP_FIELDS
+                    if st.session_state.get(f"imp_map_{field}") not in (None, "", "— aucune —")
+                }
+                include_dups_confirmed = bool(st.session_state.get("imp_dups"))
+                try:
+                    with session_scope() as db:
+                        batch = _scoped_batch(db, int(batch_id), ctx.org_id)
+                        final_report = validate_batch(
+                            db, batch, mapping_confirmed, include_duplicates=include_dups_confirmed
+                        )
+                        created, carbon_created = create_expenses_from_report(
+                            db,
+                            organization_id=ctx.org_id,
+                            user_id=ctx.user_id,
+                            report=final_report,
+                            batch_filename=batch.filename,
+                        )
+                        batch.status = "importe"
+                        batch.summary = {
+                            **(batch.summary or {}),
+                            "imported": created,
+                            "carbon_created": carbon_created,
+                            "stats": final_report.stats,
+                        }
+                        Path(batch.stored_path).unlink(missing_ok=True)
+                        audit.log(
+                            db,
+                            action="import_confirmed",
+                            organization_id=ctx.org_id,
+                            user_id=ctx.user_id,
+                            entity_type="import_batch",
+                            entity_id=batch.id,
+                            details={"lignes_importees": created, "carbone": carbon_created, "fichier": batch.filename},
+                        )
+                        db.commit()
+                except Exception as exc:
+                    st.error(str(getattr(exc, "message", exc)))
+                else:
+                    for key in (
+                        "imp_batch_id",
+                        "imp_columns",
+                        "imp_suggested",
+                        "imp_total_rows",
+                        "imp_warnings",
+                        "imp_report",
+                        "imp_fingerprint",
+                    ):
+                        st.session_state.pop(key, None)
+                    message = (
+                        f"Importation terminée : {created} dépense(s) créée(s), "
+                        f"{carbon_created} estimation(s) carbone associée(s)."
+                    )
+                    if final_report.stats.get("errors"):
+                        message += f" {final_report.stats['errors']} ligne(s) en erreur ont été écartées."
+                    _flash("success", message)
+                    st.rerun()
+
+    st.subheader("Historique des imports")
+    batches = _load_batches(ctx.org_id)
+    if not batches:
+        st.caption("Aucune importation enregistrée pour le moment.")
+    else:
+        history_rows = [
+            {
+                "Fichier": batch["filename"],
+                "Date": fmt_date(batch["created"].date()) if batch["created"] else "—",
+                "Statut": IMPORT_STATUS_LABELS.get(batch["status"], batch["status"]),
+                "Lignes importées": batch["imported"] if batch["imported"] is not None else "—",
+                "Estimations carbone": batch["carbon_created"] if batch["carbon_created"] is not None else "—",
+            }
+            for batch in batches
+        ]
+        st.dataframe(pd.DataFrame(history_rows), hide_index=True, use_container_width=True)
+
+
+# ---------------------------------------------------------------------------
+# Rapports et exports
+# ---------------------------------------------------------------------------
+def page_reports(ctx: Espace) -> None:
+    st.title("Rapports et exports")
+    st.caption(
+        "Générez un rapport PDF de gestion (dépenses + émissions), un rapport PDF de décision ou un export "
+        "Excel à trois feuilles. Les chiffres proviennent du même moteur de calcul que le tableau de bord."
+    )
+    scope = st.radio(
+        "Type de rapport", ["Période de gestion", "Projet de décision"], horizontal=True, key="rep_scope"
+    )
+
+    if scope == "Période de gestion":
+        preset_label = st.radio(
+            "Période analysée", ["Année en cours", "Tout l'historique", "Personnalisée"], horizontal=True, key="rep_period"
+        )
+        preset = {"Année en cours": "annee", "Tout l'historique": "tout", "Personnalisée": "personnalise"}[preset_label]
+        if preset == "personnalise":
+            today = date.today()
+            col_start, col_end = st.columns(2)
+            start_date = col_start.date_input("Du", value=date(today.year, 1, 1), key="rep_start")
+            end_date = col_end.date_input("Au", value=today, key="rep_end")
+            resolved = resolve_period("personnalise", start=start_date, end=end_date)
+        else:
+            resolved = resolve_period(preset, today=date.today())
+
+        with session_scope() as db:
+            expenses, records = collect_period_data(db, ctx.org_id, resolved)
+            expense_summary = summarize_expenses(expenses)
+            emission_summary, _emission_rows = emissions_breakdown(records)
+
+        period_text = (
+            "toutes les données enregistrées"
+            if resolved.key == "tout"
+            else f"{fmt_date(resolved.start)} → {fmt_date(resolved.end)}"
+        )
+        st.markdown(
+            f'<span class="cl-badge">Contenu du rapport — {resolved.label} ({period_text})</span>',
+            unsafe_allow_html=True,
+        )
+        report_cols = st.columns(4)
+        _kpi(report_cols[0], "Dépenses HT", fmt_money(expense_summary.total_ht), f"{expense_summary.count} ligne(s)")
+        _kpi(report_cols[1], "TVA", fmt_money(expense_summary.total_vat), f"TTC : {fmt_money(expense_summary.total_ttc)}")
+        _kpi(
+            report_cols[2],
+            "Émissions",
+            fmt_tco2e(emission_summary.total_t),
+            f"{len(records)} enregistrement(s) · estimé : {fmt_number(emission_summary.estimated_share_pct, 1)} %",
+        )
+        _kpi(
+            report_cols[3],
+            "Dépenses non estimées",
+            str(expense_summary.without_factor_count),
+            f"{fmt_money(expense_summary.without_factor_amount)} sans facteur",
+        )
+
+        output = st.radio(
+            "Format", ["PDF (rapport de gestion)", "Excel (export des données)"], horizontal=True, key="rep_output"
+        )
+        if st.button("Générer le rapport", key="rep_generate", type="primary"):
+            try:
+                with session_scope() as db:
+                    if output.startswith("Excel"):
+                        filename, content = export_period_excel(db, organization_id=ctx.org_id, resolved=resolved)
+                        st.session_state["rep_download"] = {
+                            "label": "Télécharger l'export Excel",
+                            "name": filename,
+                            "data": content,
+                            "mime": EXCEL_MIME,
+                        }
+                    else:
+                        organization = db.get(Organization, ctx.org_id)
+                        user = db.get(User, ctx.user_id)
+                        report = generate_period_report(
+                            db, organization=organization, user=user, resolved=resolved
+                        )
+                        st.session_state["rep_download"] = {
+                            "label": f"Télécharger « {report.title} »",
+                            "name": f"rapport_gestion_{resolved.range_slug}.pdf",
+                            "data": Path(report.file_path).read_bytes(),
+                            "mime": "application/pdf",
+                        }
+                st.success("Rapport généré : utilisez le bouton de téléchargement ci-dessous.")
+            except Exception as exc:
+                st.error(str(getattr(exc, "message", exc)))
+    else:
+        projects = _load_projects(ctx.org_id)
+        if not projects:
+            st.info(
+                "Aucun projet de décision pour le moment. Créez-en un dans « Comparateur de décisions » "
+                "(au moins deux options) pour produire un rapport PDF de décision."
+            )
+        else:
+            titles = [f"{project['title']} — {project['option_count']} option(s)" for project in projects]
+            choice = st.selectbox("Projet", titles, key="rep_project")
+            chosen = projects[titles.index(choice)]
+            if chosen["option_count"] < 2:
+                st.warning("Ce projet comporte moins de deux options : rapport impossible — complétez la comparaison.")
+            if st.button("Générer le rapport PDF du projet", key="rep_generate_project", type="primary"):
+                try:
+                    with session_scope() as db:
+                        project = (
+                            db.execute(
+                                select(DecisionProject)
+                                .options(selectinload(DecisionProject.options))
+                                .where(
+                                    DecisionProject.id == chosen["id"],
+                                    DecisionProject.organization_id == ctx.org_id,
+                                )
+                            )
+                            .scalar_one()
+                        )
+                        organization = db.get(Organization, ctx.org_id)
+                        user = db.get(User, ctx.user_id)
+                        report = generate_project_report(
+                            db, organization=organization, user=user, project=project
+                        )
+                        st.session_state["rep_download"] = {
+                            "label": f"Télécharger « {report.title} »",
+                            "name": f"rapport_decision_{project.id}.pdf",
+                            "data": Path(report.file_path).read_bytes(),
+                            "mime": "application/pdf",
+                        }
+                    st.success("Rapport généré : utilisez le bouton de téléchargement ci-dessous.")
+                except Exception as exc:
+                    st.error(str(getattr(exc, "message", exc)))
+
+    download = st.session_state.get("rep_download")
+    if download:
+        st.download_button(
+            download["label"],
+            data=download["data"],
+            file_name=download["name"],
+            mime=download["mime"],
+            key="rep_download_btn",
+            type="primary",
+        )
+
+    st.subheader("Historique des rapports")
+    reports = _load_reports(ctx.org_id)
+    if not reports:
+        st.caption("Aucun rapport généré pour le moment.")
+    else:
+        history_rows = [
+            {
+                "Titre": report["title"],
+                "Type": "Projet" if report["scope"] == "projet" else "Période",
+                "Créé le": report["created"].strftime("%d/%m/%Y %H:%M") if report["created"] else "—",
+                "Fichier": "disponible" if report["exists"] else "indisponible (regénérez le rapport)",
+            }
+            for report in reports
+        ]
+        st.dataframe(pd.DataFrame(history_rows), hide_index=True, use_container_width=True)
+        for report_row in reports[:10]:
+            col_dl, col_rm, _pad = st.columns([1, 1, 2])
+            if report_row["exists"]:
+                if col_dl.button("Télécharger", key=f"rep_dl_{report_row['id']}", use_container_width=True):
+                    st.session_state["rep_download"] = {
+                        "label": f"Télécharger « {report_row['title']} »",
+                        "name": f"{report_row['title']}.pdf",
+                        "data": Path(report_row["path"]).read_bytes(),
+                        "mime": "application/pdf",
+                    }
+                    st.rerun()
+            if col_rm.button("Supprimer", key=f"rep_rm_{report_row['id']}", use_container_width=True):
+                with session_scope() as db:
+                    report = db.get(Report, report_row["id"])
+                    if report is not None and report.organization_id == ctx.org_id:
+                        if report.file_path:
+                            Path(report.file_path).unlink(missing_ok=True)
+                        audit.log(
+                            db,
+                            action="report_deleted",
+                            organization_id=ctx.org_id,
+                            user_id=ctx.user_id,
+                            entity_type="report",
+                            entity_id=report.id,
+                            details={"titre": report.title},
+                            commit=True,
+                        )
+                        db.delete(report)
+                        db.commit()
+                st.session_state.pop("rep_download", None)
+                _flash("success", "Rapport supprimé.")
+                st.rerun()
+
+
+# ---------------------------------------------------------------------------
+# Assistant IA
+# ---------------------------------------------------------------------------
+def _copilot_respond(ctx: Espace, history: list, question: str) -> None:
+    """Interroge l'assistant (mode IA si configuré, sinon calcul local) et journalise."""
+    with session_scope() as db:
+        organization = db.get(Organization, ctx.org_id)
+        answer = ask(
+            db,
+            organization,
+            question,
+            [{"role": entry["role"], "content": entry["content"]} for entry in history],
+        )
+        audit.log(
+            db,
+            action="copilot_question",
+            organization_id=ctx.org_id,
+            user_id=ctx.user_id,
+            details={"mode": answer.mode, "question": question[:140]},
+            commit=True,
+        )
+    history.append({"role": "user", "content": question})
+    mode_label = "Réponse IA" if answer.mode == "ia" else "Mode démonstration — calcul local"
+    data_label = " · ".join(answer.data_used) if answer.data_used else "aucune donnée utilisée"
+    history.append(
+        {
+            "role": "assistant",
+            "content": answer.answer,
+            "meta": f"{mode_label} · {data_label}",
+            "disclaimers": answer.disclaimers,
+            "error": answer.error,
+        }
+    )
+
+
+def page_copilot(ctx: Espace) -> None:
+    st.title("Assistant IA")
+    if settings.ai_configured:
+        st.caption(
+            f"Assistant connecté au modèle « {settings.ai_model} ». Il répond uniquement à partir de vos données "
+            "réelles (aucun chiffre inventé) et signale explicitement toute donnée manquante."
+        )
+    else:
+        st.info(
+            "**Mode démonstration** : l'assistant répond localement, à partir de vos données réelles, "
+            "sans clé d'API. Pour activer l'assistant IA génératif, ajoutez le secret "
+            "`CARBONLEDGER_AI_API_KEY` (voir DEPLOYMENT.md § 4.4)."
+        )
+    counts = _counts(ctx.org_id)
+    st.markdown(
+        f'<span class="cl-badge">{counts["expenses"]} dépense(s) · {counts["records"]} enregistrement(s) carbone · '
+        f'{counts["projects"]} projet(s) de décision</span>',
+        unsafe_allow_html=True,
+    )
+
+    history = st.session_state.setdefault("cop_history", [])
+    if not history:
+        st.markdown(
+            '<div class="cl-empty"><h3>Posez votre question sur vos chiffres</h3>'
+            "<p>L'assistant s'appuie sur le moteur de calcul : dépenses par catégorie, émissions, "
+            "comparaisons de décisions, hypothèses les plus influentes, informations manquantes. "
+            "Il n'invente jamais de chiffre : si une donnée manque, il le dit et indique où la saisir.</p></div>",
+            unsafe_allow_html=True,
+        )
+
+    for entry in history:
+        with st.chat_message("user" if entry["role"] == "user" else "assistant"):
+            st.markdown(entry["content"])
+            if entry["role"] == "assistant":
+                if entry.get("meta"):
+                    st.caption(entry["meta"])
+                if entry.get("error"):
+                    st.warning(entry["error"])
+                for disclaimer in entry.get("disclaimers") or []:
+                    st.caption(f"• {disclaimer}")
+
+    st.caption("Questions suggérées :")
+    suggestion_cols = st.columns(2)
+    for index, suggestion in enumerate(SUGGESTED_QUESTIONS[:4]):
+        if suggestion_cols[index % 2].button(suggestion, key=f"cop_q_{index}", use_container_width=True):
+            _copilot_respond(ctx, history, suggestion)
+            st.rerun()
+    if history and st.button("Effacer la conversation", key="cop_clear"):
+        history.clear()
+        st.rerun()
+
+    question = st.chat_input("Vos dépenses, vos émissions, une décision à comparer…", key="cop_input")
+    if question:
+        _copilot_respond(ctx, history, question)
+        st.rerun()
+
+
 def page_settings(ctx: Espace) -> None:
     st.title("Paramètres")
     counts = _counts(ctx.org_id)
@@ -1980,9 +2636,12 @@ def main() -> None:
     pages = {
         "Tableau de bord": page_dashboard,
         "Dépenses": page_expenses,
+        "Imports": page_imports,
         "Comptabilité carbone": page_carbon,
         "Comparateur de décisions": page_comparator,
         "Simulations": page_simulations,
+        "Rapports": page_reports,
+        "Assistant IA": page_copilot,
         "Paramètres": page_settings,
     }
     pages.get(page, page_dashboard)(espace)

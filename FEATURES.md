@@ -8,9 +8,11 @@ Légende : ✅ **Fait** (implémenté et couvert par des tests ou vérifié dans
 l'application) · 🟡 **Partiel** (fonctionne, mais avec une réserve explicite) ·
 ⛔ **Non fait** (assumé, avec la raison).
 
-Dernière mise à jour : octobre 2026. Vérifications : `pytest` → **115 tests
-passés** ; script de bout en bout → **43 vérifications passées** (inscription,
-démonstration, 8 sections, comparateur, APIs, rapports, copilot, export).
+Dernière mise à jour : octobre 2026. Vérifications : `pytest` → **121 tests
+passés** (dont les parcours Streamlit : imports, rapports PDF/Excel, assistant
+IA, et la génération des rapports côté serveur) ; script de bout en bout →
+**43 vérifications passées** (inscription, démonstration, 8 sections,
+comparateur, APIs, rapports, copilot, export).
 
 ---
 
@@ -154,6 +156,11 @@ compromis, pondère selon la priorité, et explique chaque classement.
 | Export CSV dépenses / carbone / comparaison / problèmes d'import | ✅ | CSV avec séparateur `;` (Excel FR) |
 | Export JSON complet de l'organisation | ✅ | Paramètres → Données (portabilité RGPD-like) |
 
+Dans l'application Streamlit (`streamlit_app.py`) : les mêmes rapports PDF et
+exports Excel sont générés et téléchargés directement (période en cours,
+tout l'historique ou dates personnalisées, projet de décision), avec un
+historique des rapports (téléchargement, suppression).
+
 ## 9. Assistant IA
 
 | Exigence | État | Détail |
@@ -163,6 +170,11 @@ compromis, pondère selon la priorité, et explique chaque classement.
 | Avec clé : API compatible OpenAI (OpenAI, Azure, Mistral, Ollama…) | 🟡 | intégration écrite et configurable, **non exercée** dans cet environnement (aucune clé disponible). Le contrat « ne jamais inventer » repose sur le contexte fourni et les instructions du modèle. |
 | Clé d'API jamais exposée au navigateur | ✅ | configuration serveur uniquement |
 | Refus explicite hors périmètre | ✅ | le Copilot déclare ne pas pouvoir répondre sans données |
+
+Dans l'application Streamlit (`streamlit_app.py`) : interface de conversation
+(questions suggérées, historique, mode affiché), même moteur de réponse — IA
+si `CARBONLEDGER_AI_API_KEY` est configurée, sinon mode démonstration
+déterministe calculé localement.
 
 ## 10. Authentification, rôles, isolation
 
@@ -185,7 +197,7 @@ compromis, pondère selon la priorité, et explique chaque classement.
 | Tests de l'exemple chiffré du cahier des charges | ✅ | 200 000 / 180 000 / 25 t / −800 DH/t / payback 2,143 ans |
 | Tests d'intégration web (inscription → import → décision → rapport) | ✅ | `tests/test_web_flow.py` |
 | Tests de sécurité (CSRF, rôles, isolation, sessions) | ✅ | `tests/test_security.py` |
-| **Total** | ✅ | **115 tests, 0 avertissement** — commande dans le [README](README.md#vérifier-linstallation) |
+| **Total** | ✅ | **121 tests, 0 avertissement** — commande dans le [README](README.md#vérifier-linstallation) |
 
 ## 12. Sécurité
 
@@ -230,10 +242,10 @@ compromis, pondère selon la priorité, et explique chaque classement.
 | Schéma de base + migrations | ✅ | `docs/schema.sql`, `docs/DATABASE.md`, Alembic (`alembic upgrade head`), `alembic check` propre |
 | `.env.example` documenté | ✅ | 11 variables commentées |
 | Jeu de données de démonstration | ✅ | `scripts/seed_demo.py` + chargement intégré |
-| Tests de calcul | ✅ | `tests/` (115 tests) |
+| Tests de calcul | ✅ | `tests/` (121 tests) |
 | README | ✅ | installation, configuration, formules, API, sécurité, limites |
 | Instructions de déploiement | ✅ | [DEPLOYMENT.md](DEPLOYMENT.md) : local, Linux + PostgreSQL + Nginx + systemd, Docker, sauvegardes, Streamlit Community Cloud |
-| Application Streamlit (démo publique) | ✅ | `streamlit_app.py` — accueil, inscription, connexion, espaces isolés par entreprise, mêmes moteurs de calcul ; démonstration chargée sur demande |
+| Application Streamlit (démo publique) | ✅ | `streamlit_app.py` — accueil, inscription, connexion, espaces isolés par entreprise, mêmes moteurs de calcul, imports CSV/Excel (4 étapes), rapports PDF/Excel téléchargeables, assistant IA (démo locale ou clé d'API) ; démonstration chargée sur demande |
 | Liste d'état des fonctionnalités | ✅ | ce document |
 
 ## 16. Limites assumées et hors périmètre
