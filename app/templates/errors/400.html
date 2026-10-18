@@ -1,0 +1,19 @@
+{% extends "base.html" %}
+{% block title %}Requête invalide — {{ app_name }}{% endblock %}
+
+{% block content %}
+<div class="empty">
+  <div class="empty__icon" aria-hidden="true">⚠</div>
+  <h2 class="empty__title">La demande n'a pas pu être traitée</h2>
+  <p class="empty__message">
+    {{ message | default("Un élément de la demande est invalide ou incomplet.") }}
+  </p>
+  <p class="muted small">
+    Corrigez les informations concernées puis réessayez. Aucune donnée n'a été modifiée par cette requête.
+  </p>
+  <div class="btn-row">
+    <a class="btn btn--primary" href="/">Retour au tableau de bord</a>
+    <a class="btn" href="/decisions">Ouvrir le comparateur</a>
+  </div>
+</div>
+{% endblock %}

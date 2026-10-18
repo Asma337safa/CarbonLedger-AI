@@ -1,0 +1,197 @@
+{% extends "base.html" %}
+{% import "macros/ui.html" as ui %}
+{% from "decisions/_panels.html" import figures_row, options_table, pairs_table, charts_grid, missing_panel, arbitration_panel, sensitivity_panel, scenarios_panel %}
+{% block title %}Simulations — {{ app_name }}{% endblock %}
+{% block page_title %}Simulations{% endblock %}
+{% block page_subtitle %}
+<span class="muted small">
+  Déplacez les hypothèses et observez l'effet sur les coûts, les émissions et la recommandation.
+  Rien n'est enregistré : vous décidez ensuite.
+</span>
+{% endblock %}
+
+{% set param_labels = {
+  'energy_price_delta_pct': "Prix de l'énergie",
+  'transport_delta_pct': "Coûts de transport",
+  'savings_delta_pct': "Économies attendues",
+  'activity_volume_delta_pct': "Volume d'activité",
+  'emission_factor_delta_pct': "Facteurs d'émission",
+  'lifetime_delta_years': "Durée d'utilisation"
+} %}
+
+{% block content %}
+
+{% if not selectable %}
+  {{ ui.empty_state(
+      "Aucun projet simulable",
+      "Les simulations s'appuient sur un projet de décision comparant au moins deux options. Créez d'abord une comparaison,
+       puis revenez tester des hypothèses (prix de l'énergie, transport, économies, durée d'utilisation).",
+      "/decisions/new",
+      "Créer une comparaison"
+  ) }}
+{% else %}
+<div id="sim-page" data-project-id="{{ selected.id if selected else '' }}">
+
+  <div class="card">
+    <div class="card__body">
+      <form method="get" action="/simulations" class="filters">
+        <label class="field field--grow">
+          <span class="field__label">Projet simulé</span>
+          <select name="project_id">
+            {% for project in selectable %}
+            <option value="{{ project.id }}" {% if selected and project.id == selected.id %}selected{% endif %}>
+              {{ project.title }} — {{ project.options | length }} option(s), horizon {{ project.horizon_years }} ans
+            </option>
+            {% endfor %}
+          </select>
+        </label>
+        <div class="btn-row">
+          <button type="submit" class="btn btn--primary">Afficher ce projet</button>
+          <a class="btn" href="/decisions/{{ selected.id }}">Ouvrir le comparateur</a>
+        </div>
+      </form>
+      <p class="muted small mt-1">
+        {{ projects | length }} projet(s) enregistré(s) · {{ selectable | length }} simulable(s)
+        (deux options minimum avec des coûts exploitables).
+      </p>
+    </div>
+  </div>
+
+  {% if error %}
+  <div class="notice notice--danger">
+    <strong class="notice__title">Simulation impossible</strong>
+    <span class="notice__message">{{ error }}</span>
+  </div>
+  {% endif %}
+
+  <div class="grid grid--sidebar">
+    <div>
+      <div class="card">
+        <div class="card__header">
+          <span class="card__title">Hypothèses de simulation</span>
+          <span class="card__subtitle">Valeurs exprimées en écart par rapport aux données saisies</span>
+        </div>
+        <div class="card__body">
+          <div class="form-grid">
+            <label class="field">
+              <span class="field__label">Nom de la simulation (facultatif)</span>
+              <input type="text" id="sim-name" placeholder="Ex. : budget 2026 sous tension">
+            </label>
+            <label class="field">
+              <span class="field__label">Priorité d'arbitrage appliquée</span>
+              <select id="sim-priority">
+                {% for key, label in priorities.items() %}
+                <option value="{{ key }}" {% if selected and key == selected.priority %}selected{% endif %}>{{ label }}</option>
+                {% endfor %}
+              </select>
+            </label>
+          </div>
+
+          {% for key, label in param_labels.items() %}
+          <div class="slider-row">
+            <label class="field">
+              <span class="field__label">{{ label }}</span>
+              <input type="range" data-param="{{ key }}"
+                     min="{{ -3 if key == 'lifetime_delta_years' else -50 }}"
+                     max="{{ 5 if key == 'lifetime_delta_years' else 50 }}"
+                     step="{{ 1 if key == 'lifetime_delta_years' else 5 }}" value="0">
+            </label>
+            <span class="slider-row__value" data-param-output="{{ key }}">0{% if key == 'lifetime_delta_years' %} an(s){% else %} %{% endif %}</span>
+          </div>
+          {% endfor %}
+
+          <div class="btn-row">
+            <button type="button" class="btn btn--small btn--primary" id="sim-run">Recalculer</button>
+            <button type="button" class="btn btn--small" id="sim-reset">Réinitialiser</button>
+            <button type="button" class="btn btn--small" data-preset="optimiste">Hypothèses favorables</button>
+            <button type="button" class="btn btn--small" data-preset="defavorable">Hypothèses défavorables</button>
+          </div>
+          <p class="muted small mt-1" id="sim-status" role="status">
+            Les hypothèses favorables et défavorables sont des jeux prédéfinis explicites : prix de l'énergie et
+            transport −10 % ou +15 %, économies ±10 %/−20 %, facteurs d'émission ±5/10 %.
+          </p>
+          <p class="muted small">
+            Une simulation ne modifie jamais le projet : pour conserver un jeu d'hypothèses, enregistrez-le
+            comme scénario depuis la page du projet.
+          </p>
+        </div>
+      </div>
+    </div>
+
+    <div>
+      <div class="card">
+        <div class="card__header"><span class="card__title">Rappel de méthode</span></div>
+        <div class="card__body">
+          <ul class="list-check">
+            <li><span>Le volume d'activité module fonctionnement et économies</span></li>
+            <li><span>La maintenance reste constante (hypothèse affichée)</span></li>
+            <li><span>La part d'énergie doit être renseignée pour que ce scénario s'applique</span></li>
+          </ul>
+        </div>
+      </div>
+      <div class="card">
+        <div class="card__header"><span class="card__title">Prérequis de qualité</span></div>
+        <div class="card__body">
+          <p class="muted small">
+            Une simulation sur des données fragiles reste fragile : vérifiez les avertissements
+            « données manquantes » affichés avec les résultats.
+          </p>
+          <div class="btn-row">
+            <a class="btn btn--small" href="/settings?tab=facteurs">Vérifier les facteurs d'émission</a>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  {% if analysis %}
+    <div id="analysis">
+      <h2>Résultats de la simulation</h2>
+      {{ figures_row(figures, analysis.formula) }}
+
+      <div class="card">
+        <div class="card__header">
+          <span class="card__title">Données manquantes ou fragiles</span>
+          <span class="card__subtitle">Signalées telles quelles, jamais complétées automatiquement</span>
+        </div>
+        <div class="card__body">{{ missing_panel(analysis.missing_data) }}</div>
+      </div>
+
+      <div class="card">
+        <div class="card__header">
+          <span class="card__title">Résultats par option</span>
+          <span class="card__subtitle">Période commune de {{ analysis.horizon_years }} ans</span>
+        </div>
+        {{ options_table(analysis.comparison) }}
+      </div>
+
+      {{ charts_grid(analysis.charts) }}
+
+      {{ arbitration_panel(analysis.arbitration, analysis.comparison) }}
+
+      {{ scenarios_panel(analysis) }}
+
+      {{ sensitivity_panel(analysis) }}
+
+      {% if analysis.comparison.pairs %}
+      <div class="card">
+        <div class="card__header"><span class="card__title">Comparaisons deux à deux</span></div>
+        <div class="card__body">{{ pairs_table(analysis.comparison) }}</div>
+      </div>
+      {% endif %}
+    </div>
+  {% elif not error %}
+    <div class="notice notice--info">
+      <strong class="notice__title">Sélectionnez un projet</strong>
+      <span class="notice__message">Choisissez un projet de décision ci-dessus pour afficher ses résultats simulés.</span>
+    </div>
+  {% endif %}
+</div>
+{% endif %}
+
+{% endblock %}
+
+{% block scripts %}
+<script src="/static/js/decision.js" defer></script>
+<script src="/static/js/sim.js" defer></script>
+{% endblock %}

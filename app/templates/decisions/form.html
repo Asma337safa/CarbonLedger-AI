@@ -1,0 +1,475 @@
+{% extends "base.html" %}
+{% import "macros/ui.html" as ui %}
+{% block title %}{{ "Modifier le projet" if project else "Nouvelle comparaison" }} — {{ app_name }}{% endblock %}
+{% block page_title %}{{ "Modifier le projet de décision" if project else "Nouvelle comparaison de décisions" }}{% endblock %}
+{% block page_subtitle %}
+<span class="muted small">
+  Chaque option est recalculée en direct : coûts cumulés, émissions cumulées, coût par tonne de CO₂e évitée.
+  Aucun chiffre n'est inventé — les données manquantes sont signalées.
+</span>
+{% endblock %}
+
+{# ---------------------------------------------------------------------------
+   Aides de pré-remplissage : valeurs d'un formulaire rejeté (champs répétés).
+--------------------------------------------------------------------------- #}
+{% macro fv(key, index) -%}
+{%- set values = form.get(key) -%}
+{%- if values is string -%}{{ values if index == 0 else '' }}
+{%- elif values -%}{{ values[index] if index < (values | length) else '' }}
+{%- endif -%}
+{%- endmacro %}
+
+{% macro mv(key, fallback='') -%}
+{%- set values = form.get(key) if form else none -%}
+{%- if values is string -%}{{ values }}
+{%- elif values -%}{{ values[0] }}
+{%- else -%}{{ fallback }}
+{%- endif -%}
+{%- endmacro %}
+
+{# ---------------------------------------------------------------------------
+   Carte d'option : les champs répétés sont lus par le serveur (option_name…)
+   et par static/js/decision.js (aperçu en direct).
+--------------------------------------------------------------------------- #}
+{% macro option_card(index, data) %}
+<div class="option-card">
+  <div class="option-card__head">
+    <span class="option-card__title">Option {{ index + 1 }}</span>
+    <button type="button" class="btn btn--small btn--ghost" data-remove-option>Retirer cette option</button>
+  </div>
+  <input type="hidden" name="option_key" value="{{ data.key }}">
+  <div class="form-grid">
+    <label class="field span-2">
+      <span class="field__label">Nom de l'option <span class="req" aria-hidden="true">*</span></span>
+      <input type="text" name="option_name" value="{{ data.name }}" placeholder="Ex. : chaudière biomasse 120 kW" required>
+      <span class="field__help">Nom court et explicite (équipement, fournisseur, solution).</span>
+    </label>
+    <label class="field">
+      <span class="field__label">Fournisseur</span>
+      <input type="text" name="option_supplier" value="{{ data.supplier }}" placeholder="Ex. : Sonasid Énergie">
+    </label>
+    <label class="field">
+      <span class="field__label">Coût d'acquisition (DH)</span>
+      <input type="number" name="option_purchase_cost" value="{{ data.purchase_cost }}" min="0" step="0.01" placeholder="0">
+    </label>
+    <label class="field">
+      <span class="field__label">Coût de transport / installation (DH)</span>
+      <input type="number" name="option_transport_cost" value="{{ data.transport_cost }}" min="0" step="0.01" placeholder="0">
+    </label>
+    <label class="field">
+      <span class="field__label">Coûts de fonctionnement annuels (DH/an)</span>
+      <input type="number" name="option_annual_opex" value="{{ data.annual_opex }}" min="0" step="0.01" placeholder="0">
+      <span class="field__help">Énergie, consommables, exploitation.</span>
+    </label>
+    <label class="field">
+      <span class="field__label">Part d'énergie dans ces coûts (%)</span>
+      <input type="number" name="option_annual_energy_share_pct" value="{{ data.annual_energy_share_pct }}" min="0" max="100" step="1" placeholder="—">
+      <span class="field__help">Utilisée pour le scénario « hausse du prix de l'énergie ».</span>
+    </label>
+    <label class="field">
+      <span class="field__label">Maintenance annuelle (DH/an)</span>
+      <input type="number" name="option_annual_maintenance" value="{{ data.annual_maintenance }}" min="0" step="0.01" placeholder="0">
+    </label>
+    <label class="field">
+      <span class="field__label">Économies annuelles attendues (DH/an)</span>
+      <input type="number" name="option_annual_savings" value="{{ data.annual_savings }}" min="0" step="0.01" placeholder="0">
+      <span class="field__help">Donnée déclarée : à confirmer par le réalisé.</span>
+    </label>
+    <label class="field">
+      <span class="field__label">Durée d'utilisation (années)</span>
+      <input type="number" name="option_useful_life_years" value="{{ data.useful_life_years }}" min="0.1" step="0.1" placeholder="—">
+    </label>
+    <label class="field">
+      <span class="field__label">Niveau de confiance des données</span>
+      <select name="option_confidence">
+        {% for key, label in confidence_levels.items() %}
+        <option value="{{ key }}" {% if (data.confidence or 'moyenne') == key %}selected{% endif %}>{{ label }}</option>
+        {% endfor %}
+      </select>
+    </label>
+    <label class="field">
+      <span class="field__label">Émissions annuelles (kg CO₂e/an)</span>
+      <input type="number" name="option_annual_emissions_kg" value="{{ data.annual_emissions_kg }}" min="0" step="0.001" placeholder="—">
+      <span class="field__help">Laissez vide si non renseigné : la comparaison carbone sera marquée indisponible.</span>
+    </label>
+    <label class="field">
+      <span class="field__label">Base des émissions</span>
+      <select name="option_emissions_basis">
+        <option value="">— Non renseignée —</option>
+        {% for key, label in carbon_statuses.items() %}
+        <option value="{{ key }}" {% if data.emissions_basis == key %}selected{% endif %}>{{ label }}</option>
+        {% endfor %}
+      </select>
+    </label>
+    <label class="field span-2">
+      <span class="field__label">Source des émissions (facteur, référence, calcul)</span>
+      <input type="text" name="option_emissions_source_note" value="{{ data.emissions_source_note }}" placeholder="Ex. : 6 200 L gasoil × 2,68 kgCO₂e/L (IPCC 2006)">
+      <span class="field__help">Obligatoire pour un usage sérieux : aucune valeur n'est attribuée automatiquement.</span>
+    </label>
+    <label class="field span-4">
+      <span class="field__label">Notes</span>
+      <textarea name="option_notes" rows="2" placeholder="Hypothèses, conditions de garantie, points à vérifier…">{{ data.notes }}</textarea>
+    </label>
+  </div>
+</div>
+{% endmacro %}
+
+{% set blank = {
+  'key': '', 'name': '', 'supplier': '', 'purchase_cost': '', 'transport_cost': '',
+  'annual_opex': '', 'annual_energy_share_pct': '', 'annual_maintenance': '', 'annual_savings': '',
+  'useful_life_years': '', 'annual_emissions_kg': '', 'emissions_basis': '', 'emissions_source_note': '',
+  'confidence': 'moyenne', 'notes': ''
+} %}
+
+{% set cards = [] %}
+{% if project and options %}
+  {% for option in options %}
+    {% set _ = cards.append({
+      'key': 'o' ~ option.id,
+      'name': option.name or '',
+      'supplier': option.supplier or '',
+      'purchase_cost': option.purchase_cost if option.purchase_cost is not none else '',
+      'transport_cost': option.transport_cost if option.transport_cost is not none else '',
+      'annual_opex': option.annual_opex if option.annual_opex is not none else '',
+      'annual_energy_share_pct': option.annual_energy_share_pct if option.annual_energy_share_pct is not none else '',
+      'annual_maintenance': option.annual_maintenance if option.annual_maintenance is not none else '',
+      'annual_savings': option.annual_savings if option.annual_savings is not none else '',
+      'useful_life_years': option.useful_life_years if option.useful_life_years is not none else '',
+      'annual_emissions_kg': option.annual_emissions_kg if option.annual_emissions_kg is not none else '',
+      'emissions_basis': option.emissions_basis or '',
+      'emissions_source_note': option.emissions_source_note or '',
+      'confidence': option.confidence or 'moyenne',
+      'notes': option.notes or ''
+    }) %}
+  {% endfor %}
+{% elif form and form.get('option_name') %}
+  {% set raw_names = form.get('option_name') %}
+  {% set names = raw_names if raw_names is string else raw_names %}
+  {% for name in names %}
+    {% set i = loop.index0 %}
+    {% set _ = cards.append({
+      'key': (fv('option_key', i) | trim),
+      'name': (fv('option_name', i) | trim),
+      'supplier': (fv('option_supplier', i) | trim),
+      'purchase_cost': (fv('option_purchase_cost', i) | trim),
+      'transport_cost': (fv('option_transport_cost', i) | trim),
+      'annual_opex': (fv('option_annual_opex', i) | trim),
+      'annual_energy_share_pct': (fv('option_annual_energy_share_pct', i) | trim),
+      'annual_maintenance': (fv('option_annual_maintenance', i) | trim),
+      'annual_savings': (fv('option_annual_savings', i) | trim),
+      'useful_life_years': (fv('option_useful_life_years', i) | trim),
+      'annual_emissions_kg': (fv('option_annual_emissions_kg', i) | trim),
+      'emissions_basis': (fv('option_emissions_basis', i) | trim),
+      'emissions_source_note': (fv('option_emissions_source_note', i) | trim),
+      'confidence': (fv('option_confidence', i) | trim) or 'moyenne',
+      'notes': (fv('option_notes', i) | trim)
+    }) %}
+  {% endfor %}
+{% else %}
+  {% set _ = cards.append(dict(blank, key='option_1')) %}
+  {% set _ = cards.append(dict(blank, key='option_2')) %}
+{% endif %}
+
+{% block content %}
+
+<form
+  id="project-form"
+  method="post"
+  action="{{ '/decisions/' ~ project.id if project else '/decisions' }}"
+  class="grid grid--sidebar">
+  <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+
+  <div>
+    <div class="card" id="project-meta">
+      <div class="card__header">
+        <span class="card__title">Projet de décision</span>
+        <span class="card__subtitle">Période commune de comparaison et hypothèses de classement</span>
+      </div>
+      <div class="card__body">
+        <div class="form-grid">
+          <label class="field span-2">
+            <span class="field__label">Titre du projet <span class="req" aria-hidden="true">*</span></span>
+            <input type="text" name="title" value="{{ (mv('title', project.title if project else '')) | trim }}" required
+                   placeholder="Ex. : Chaufferie du site de Kénitra — 2026">
+          </label>
+          <label class="field">
+            <span class="field__label">Catégorie</span>
+            <select name="category">
+              {% set current_category = (mv('category', project.category if project else 'equipements')) | trim %}
+              {% for key, label in expense_categories.items() %}
+              <option value="{{ key }}" {% if current_category == key %}selected{% endif %}>{{ label }}</option>
+              {% endfor %}
+            </select>
+          </label>
+          <label class="field">
+            <span class="field__label">Horizon de comparaison (années)</span>
+            <input type="number" id="field-horizon_years" name="horizon_years" min="1" max="30" step="1"
+                   value="{{ (mv('horizon_years', project.horizon_years if project else 5)) | trim }}">
+            <span class="field__help">Les deux options sont comparées sur cette même durée (1 à 30 ans).</span>
+          </label>
+          <label class="field">
+            <span class="field__label">Taux d'actualisation (%/an)</span>
+            <input type="number" id="field-discount_rate_pct" name="discount_rate_pct" min="0" max="40" step="0.1"
+                   value="{{ (mv('discount_rate_pct', project.discount_rate_pct if project else 0)) | trim }}">
+            <span class="field__help">0 = comparaison hors actualisation (hypothèse affichée dans le rapport).</span>
+          </label>
+          <label class="field">
+            <span class="field__label">Prix interne du carbone (DH/t CO₂e)</span>
+            <input type="number" id="field-internal_carbon_price" name="internal_carbon_price" min="0" step="1"
+                   value="{{ (mv('internal_carbon_price', project.internal_carbon_price if project else default_carbon_price)) | trim }}">
+            <span class="field__help">Hypothèse de décision, jamais une charge comptable.</span>
+          </label>
+          <label class="field span-2">
+            <span class="field__label">Priorité d'arbitrage</span>
+            {% set current_priority = (mv('priority', project.priority if project else 'equilibre')) | trim %}
+            <select id="field-priority" name="priority">
+              {% for key, label in priorities.items() %}
+              <option value="{{ key }}" {% if current_priority == key %}selected{% endif %}>{{ label }}</option>
+              {% endfor %}
+            </select>
+            <span class="field__help">Change l'ordre de recommandation, jamais les calculs.</span>
+          </label>
+          <label class="field span-4">
+            <span class="field__label">Description / contexte</span>
+            <textarea name="description" rows="2" placeholder="Contexte, contraintes, décision à prendre…">{{ (mv('description', project.description if project else '')) | trim }}</textarea>
+          </label>
+        </div>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="card__header">
+        <span class="card__title">Options à comparer</span>
+        <span class="card__subtitle">Deux options minimum · les montants sont en dirhams (DH)</span>
+      </div>
+      <div class="card__body">
+        <div id="options-container">
+          {% for card in cards %}
+            {{ option_card(loop.index0, card) }}
+          {% endfor %}
+        </div>
+        <div class="btn-row">
+          <button type="button" class="btn btn--small" data-add-option>Ajouter une option</button>
+        </div>
+        <p class="muted small mt-1">
+          Les émissions annuelles doivent venir d'une mesure, d'un calcul documenté ou d'une estimation assumée :
+          CarbonLedger n'attribue jamais de facteur automatiquement.
+        </p>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="card__body">
+        <div class="btn-row">
+          <button type="submit" class="btn btn--primary">{{ "Enregistrer les modifications" if project else "Créer le projet et comparer" }}</button>
+          <a class="btn" href="{{ '/decisions/' ~ project.id if project else '/decisions' }}">Annuler</a>
+        </div>
+        <p class="muted small mt-1" id="preview-status">L'aperçu se recalcule automatiquement à partir des valeurs saisies.</p>
+      </div>
+    </div>
+  </div>
+
+  <div>
+    <div class="card">
+      <div class="card__header"><span class="card__title">Méthode appliquée</span></div>
+      <div class="card__body">
+        <ul class="list-check">
+          <li><span>Coût total = acquisition + transport + Σ (fonctionnement + maintenance − économies)</span></li>
+          <li><span>Émissions cumulées = émissions annuelles × horizon (1 t = 1 000 kg)</span></li>
+          <li><span>Coût par t CO₂e évitée = écart de coût ÷ écart d'émissions</span></li>
+          <li><span>Aucun gagnant unique déclaré : la frontière de compromis est montrée</span></li>
+        </ul>
+        <p class="muted small mt-1">
+          Le coût par tonne évitée est un indicateur de compromis : une valeur négative signifie que l'option
+          la moins émettrice est aussi la moins chère (double gain).
+        </p>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="card__header"><span class="card__title">Préparer les données</span></div>
+      <div class="card__body">
+        <p class="muted small">
+          Vous pouvez importer un fichier de devis ou de dépenses pour retrouver les montants réels,
+          ou saisir les données carbone dans le registre pour les réutiliser.
+        </p>
+        <div class="btn-row">
+          <a class="btn btn--small" href="/imports">Importer un fichier</a>
+          <a class="btn btn--small" href="/carbon/new">Saisir une donnée carbone</a>
+        </div>
+      </div>
+    </div>
+  </div>
+</form>
+
+<div id="preview" hidden>
+  <h2>Aperçu en direct</h2>
+  <p class="muted small" data-preview-note>
+    Calcul effectué à partir des valeurs saisies : rien n'est enregistré tant que vous n'avez pas validé.
+  </p>
+
+  {% from "decisions/_panels.html" import charts_grid %}
+
+  <div class="result-highlight">
+    <div class="result-hero">
+      <div class="result-hero__label">Option la moins chère</div>
+      <div class="result-hero__value" data-figure="cheapest_name">—</div>
+      <div class="result-hero__sub">Coût total sur l'horizon :
+        <strong data-figure="cheapest_cost" data-format="money0">—</strong>
+      </div>
+    </div>
+    <div class="result-hero">
+      <div class="result-hero__label">Option la moins émettrice</div>
+      <div class="result-hero__value" data-figure="greenest_name">—</div>
+      <div class="result-hero__sub">Émissions cumulées :
+        <strong data-figure="greenest_emissions_t" data-format="tco2e">—</strong>
+      </div>
+    </div>
+    <div class="result-hero">
+      <div class="result-hero__label">Coût par tonne de CO₂e évitée</div>
+      <div class="result-hero__value" data-figure="cost_per_tonne_avoided" data-format="money-signed">—</div>
+      <div class="result-hero__sub">
+        <span class="badge badge--muted" data-flag="double_gain">En attente de calcul</span>
+      </div>
+      <div class="result-hero__sub">
+        Paire analysée : <span data-figure-pair>—</span>
+        · tonnes évitées : <span data-figure="avoided_t" data-format="number">—</span>
+      </div>
+    </div>
+  </div>
+  <p class="formula mt-1" data-formula>
+    Coût par tonne de CO₂e évitée = (coût total de l'option la moins émettrice − coût total de l'option
+    la plus émettrice) ÷ (émissions de la plus émettrice − émissions de la moins émettrice)
+  </p>
+
+  <div class="card">
+    <div class="card__header">
+      <span class="card__title">Comparaison deux à deux</span>
+      <span class="card__subtitle">Écart de coût, écart d'émissions et interprétation</span>
+    </div>
+    <div class="card__body">
+      <div class="interpretation" data-pairs-list>
+        <p class="muted small">Les comparaisons détaillées s'affichent dès que les deux options sont exploitables.</p>
+      </div>
+    </div>
+  </div>
+
+  {{ charts_grid({}) }}
+
+  <div class="grid grid--2">
+    <div class="card">
+      <div class="card__header">
+        <span class="card__title">Recommandation expliquée</span>
+        <span class="card__subtitle">Priorité : <span data-arbitration="priority">—</span> · <span data-arbitration="basis">—</span></span>
+      </div>
+      <div class="card__body">
+        <h3 data-arbitration="title">—</h3>
+        <div data-arbitration="paragraphs"></div>
+        <p class="muted small" data-arbitration="method"></p>
+      </div>
+    </div>
+    <div class="card">
+      <div class="card__header"><span class="card__title">Données manquantes ou fragiles</span></div>
+      <div class="card__body">
+        <div data-missing-data>
+          <p class="muted">Les contrôles de complétude s'affichent après le premier calcul.</p>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="card">
+    <div class="card__header"><span class="card__title">Fiches par option (classement selon la priorité)</span></div>
+    <div class="card__body">
+      <div data-arbitration="ranking"><p class="muted">En attente de calcul…</p></div>
+    </div>
+  </div>
+
+  <div class="card">
+    <div class="card__header"><span class="card__title">Limites de la recommandation</span></div>
+    <div class="card__body"><ul data-arbitration="caveats"></ul></div>
+  </div>
+</div>
+
+<template id="option-template">
+  <div class="option-card">
+    <div class="option-card__head">
+      <span class="option-card__title">Nouvelle option</span>
+      <button type="button" class="btn btn--small btn--ghost" data-remove-option>Retirer cette option</button>
+    </div>
+    <input type="hidden" name="option_key" value="">
+    <div class="form-grid">
+      <label class="field span-2">
+        <span class="field__label">Nom de l'option <span class="req" aria-hidden="true">*</span></span>
+        <input type="text" name="option_name" value="" placeholder="Ex. : chaudière gaz haute performance" required>
+      </label>
+      <label class="field">
+        <span class="field__label">Fournisseur</span>
+        <input type="text" name="option_supplier" value="">
+      </label>
+      <label class="field">
+        <span class="field__label">Coût d'acquisition (DH)</span>
+        <input type="number" name="option_purchase_cost" value="" min="0" step="0.01" placeholder="0">
+      </label>
+      <label class="field">
+        <span class="field__label">Coût de transport / installation (DH)</span>
+        <input type="number" name="option_transport_cost" value="" min="0" step="0.01" placeholder="0">
+      </label>
+      <label class="field">
+        <span class="field__label">Coûts de fonctionnement annuels (DH/an)</span>
+        <input type="number" name="option_annual_opex" value="" min="0" step="0.01" placeholder="0">
+      </label>
+      <label class="field">
+        <span class="field__label">Part d'énergie dans ces coûts (%)</span>
+        <input type="number" name="option_annual_energy_share_pct" value="" min="0" max="100" step="1" placeholder="—">
+      </label>
+      <label class="field">
+        <span class="field__label">Maintenance annuelle (DH/an)</span>
+        <input type="number" name="option_annual_maintenance" value="" min="0" step="0.01" placeholder="0">
+      </label>
+      <label class="field">
+        <span class="field__label">Économies annuelles attendues (DH/an)</span>
+        <input type="number" name="option_annual_savings" value="" min="0" step="0.01" placeholder="0">
+      </label>
+      <label class="field">
+        <span class="field__label">Durée d'utilisation (années)</span>
+        <input type="number" name="option_useful_life_years" value="" min="0.1" step="0.1" placeholder="—">
+      </label>
+      <label class="field">
+        <span class="field__label">Niveau de confiance des données</span>
+        <select name="option_confidence">
+          {% for key, label in confidence_levels.items() %}
+          <option value="{{ key }}" {% if key == 'moyenne' %}selected{% endif %}>{{ label }}</option>
+          {% endfor %}
+        </select>
+      </label>
+      <label class="field">
+        <span class="field__label">Émissions annuelles (kg CO₂e/an)</span>
+        <input type="number" name="option_annual_emissions_kg" value="" min="0" step="0.001" placeholder="—">
+      </label>
+      <label class="field">
+        <span class="field__label">Base des émissions</span>
+        <select name="option_emissions_basis">
+          <option value="">— Non renseignée —</option>
+          {% for key, label in carbon_statuses.items() %}
+          <option value="{{ key }}">{{ label }}</option>
+          {% endfor %}
+        </select>
+      </label>
+      <label class="field span-2">
+        <span class="field__label">Source des émissions (facteur, référence, calcul)</span>
+        <input type="text" name="option_emissions_source_note" value="">
+      </label>
+      <label class="field span-4">
+        <span class="field__label">Notes</span>
+        <textarea name="option_notes" rows="2"></textarea>
+      </label>
+    </div>
+  </div>
+</template>
+
+{% endblock %}
+
+{% block scripts %}
+<script src="/static/js/decision.js" defer></script>
+{% endblock %}

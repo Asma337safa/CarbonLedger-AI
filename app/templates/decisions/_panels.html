@@ -1,0 +1,307 @@
+{# Panneaux réutilisables du comparateur (résultats, arbitrage, sensibilité, scénarios).
+   Les attributs data-* définissent le contrat de mise à jour par static/js/decision.js. #}
+{% import "macros/ui.html" as ui %}
+
+{% macro figures_row(figures, formula) %}
+<div class="result-highlight">
+  <div class="result-hero">
+    <div class="result-hero__label">Option la moins chère</div>
+    <div class="result-hero__value" data-figure="cheapest_name">{{ figures.cheapest_name or "—" }}</div>
+    <div class="result-hero__sub">Coût total sur {{ figures.horizon_years }} ans :
+      <strong data-figure="cheapest_cost" data-format="money0">{{ figures.cheapest_cost | mad(0) if figures.cheapest_cost else "—" }}</strong>
+    </div>
+  </div>
+  <div class="result-hero">
+    <div class="result-hero__label">Option la moins émettrice</div>
+    <div class="result-hero__value" data-figure="greenest_name">{{ figures.greenest_name or "—" }}</div>
+    <div class="result-hero__sub">
+      Émissions cumulées :
+      <strong data-figure="greenest_emissions_t" data-format="tco2e">{{ figures.greenest_emissions_t | tco2e if figures.greenest_emissions_t else "non renseignées" }}</strong>
+    </div>
+  </div>
+  <div class="result-hero">
+    <div class="result-hero__label">Coût par tonne de CO₂e évitée</div>
+    <div class="result-hero__value" data-figure="cost_per_tonne_avoided" data-format="money-signed">
+      {{ figures.cost_per_tonne_avoided | mad if figures.cost_per_tonne_avoided is not none else "—" }}
+    </div>
+    <div class="result-hero__sub">
+      <span class="badge {% if figures.double_gain is true %}badge--success{% elif figures.double_gain is false %}badge--warning{% else %}badge--muted{% endif %}" data-flag="double_gain">
+        {% if figures.double_gain is true %}Gain double : option la moins chère ET la moins émettrice{% elif figures.double_gain is false %}Surcoût à évaluer entre coût et émissions{% else %}Données carbone insuffisantes{% endif %}
+      </span>
+    </div>
+    <div class="result-hero__sub">
+      Paire analysée : <span data-figure-pair>{% if figures.pair %}{{ figures.pair.a }} ↔ {{ figures.pair.b }}{% else %}—{% endif %}</span>
+      · tonnes évitées : <span data-figure="avoided_t" data-format="number">{{ figures.avoided_t | num if figures.avoided_t else "—" }}</span>
+    </div>
+  </div>
+</div>
+<p class="formula mt-1" data-formula>{{ formula }}</p>
+{% endmacro %}
+
+{% macro options_table(comparison) %}
+<div class="table-wrap">
+  <table class="data">
+    <thead>
+      <tr>
+        <th>Option</th>
+        <th class="num">Mise de fonds initiale</th>
+        <th class="num">Coût total ({{ comparison.horizon_years }} ans)</th>
+        <th class="num">Coût annuel net</th>
+        <th class="num">Économies cumulées</th>
+        <th class="num">Émissions cumulées</th>
+        <th class="num">Coût actualisé net</th>
+        <th>Confiance</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for result in comparison.results %}
+      <tr data-option-row="{{ result.key }}">
+        <td>
+          <strong>{{ result.name }}</strong>
+          {% if result.option.supplier %}<div class="muted small">{{ result.option.supplier }}</div>{% endif %}
+          {% if result.option.emissions_basis %}<div class="muted small">Émissions : {{ result.option.emissions_basis }}</div>{% endif %}
+        </td>
+        <td class="num" data-cell="initial_outlay" data-format="money">{{ result.initial_outlay | mad }}</td>
+        <td class="num" data-cell="total_cost" data-format="money">{{ result.total_cost | mad }}</td>
+        <td class="num" data-cell="annual_net" data-format="money">{{ result.annual_net_costs[0] | mad }}</td>
+        <td class="num" data-cell="total_savings" data-format="money">{{ result.total_savings | mad }}</td>
+        <td class="num" data-cell="total_emissions_t" data-format="tco2e">{{ result.total_emissions_t | tco2e if result.total_emissions_t is not none else "—" }}</td>
+        <td class="num" data-cell="npv" data-format="money">{{ result.npv | mad if result.npv is not none else "—" }}</td>
+        <td>{{ ui.badge(result.option.confidence, confidence_levels.get(result.option.confidence, result.option.confidence)) }}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% endmacro %}
+
+{% macro pairs_table(comparison) %}
+<div class="table-wrap">
+  <table class="data">
+    <thead>
+      <tr><th>Comparaison</th><th class="num">Écart de coût</th><th class="num">Écart d'émissions</th><th class="num">Coût par t évitée</th></tr>
+    </thead>
+    <tbody>
+      {% for pair in comparison.pairs %}
+      <tr data-pair-row="{{ pair.a_key }}|{{ pair.b_key }}">
+        <td>{{ pair.a_name }} ↔ {{ pair.b_name }}</td>
+        <td class="num" data-cell="cost_delta" data-format="money-signed">{{ pair.cost_delta | mad }}</td>
+        <td class="num" data-cell="emissions_delta_t" data-format="tco2e">{{ pair.emissions_delta_t | tco2e if pair.emissions_delta_t is not none else "—" }}</td>
+        <td class="num" data-cell="cost_per_tonne_avoided" data-format="money-signed">{{ pair.cost_per_tonne_avoided | mad if pair.cost_per_tonne_avoided is not none else "—" }}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+<div class="mt-1" data-pairs-list>
+  {% for pair in comparison.pairs %}
+  <div class="interpretation__item">{{ pair.a_name }} ↔ {{ pair.b_name }} : {{ pair.interpretation_parts | join(" ") }}</div>
+  {% endfor %}
+</div>
+{% endmacro %}
+
+{% macro charts_grid(charts, compact=false) %}
+<div class="grid grid--2">
+  <div class="card mb-0">
+    <div class="card__header"><span class="card__title">Coûts cumulés par année</span></div>
+    <div class="card__body"><div data-chart="cost_curve">{{ charts.cost_curve | safe if charts.cost_curve else "" }}</div></div>
+  </div>
+  <div class="card mb-0">
+    <div class="card__header"><span class="card__title">Émissions cumulées par année</span></div>
+    <div class="card__body">
+      {% if charts.emissions_curve %}
+        <div data-chart="emissions_curve">{{ charts.emissions_curve | safe }}</div>
+      {% else %}
+        <div data-chart="emissions_curve"></div>
+        <p class="muted small">Émissions non renseignées pour au moins une option : la courbe carbone reste indisponible.</p>
+      {% endif %}
+    </div>
+  </div>
+  <div class="card mb-0">
+    <div class="card__header"><span class="card__title">Mise de fonds et coût total</span></div>
+    <div class="card__body"><div data-chart="cost_totals">{{ charts.cost_totals | safe if charts.cost_totals else "" }}</div></div>
+  </div>
+  <div class="card mb-0">
+    <div class="card__header"><span class="card__title">Émissions cumulées par option</span></div>
+    <div class="card__body"><div data-chart="emissions_totals">{{ charts.emissions_totals | safe if charts.emissions_totals else "" }}</div></div>
+  </div>
+</div>
+{% endmacro %}
+
+{% macro missing_panel(items) %}
+<div data-missing-data>
+  {% if items %}
+    {% for item in items %}
+    <div class="notice notice--{{ item.level }}">
+      <strong class="notice__title">{{ item.message }}</strong>
+      <span class="notice__message">{{ item.hint }}</span>
+    </div>
+    {% endfor %}
+  {% else %}
+    <p class="muted">Aucune donnée manquante critique détectée pour cette comparaison.</p>
+  {% endif %}
+</div>
+{% endmacro %}
+
+{% macro arbitration_panel(arbitration, comparison) %}
+<div class="card">
+  <div class="card__header">
+    <span class="card__title">Recommandation expliquée</span>
+    <span class="card__subtitle">Priorité : <span data-arbitration="priority">{{ arbitration.priority_label }}</span>
+      · <span data-arbitration="basis">{{ "Coût étendu (émissions valorisées)" if arbitration.basis == "cout_etendu" else "Coûts financiers saisis" }}</span></span>
+  </div>
+  <div class="card__body">
+    <h3 data-arbitration="title">{{ arbitration.recommendation_title }}</h3>
+    <div data-arbitration="paragraphs">
+      {% for paragraph in arbitration.recommendation_paragraphs %}<p>{{ paragraph }}</p>{% endfor %}
+    </div>
+    <p class="muted small" data-arbitration="method">{{ arbitration.method_note }}</p>
+  </div>
+</div>
+
+<div class="card">
+  <div class="card__header">
+    <span class="card__title">Frontière de compromis</span>
+    <span class="card__subtitle">{{ comparison.frontier | length }} option(s) non dominée(s)</span>
+  </div>
+  <div class="card__body">
+    <p>
+      Options non dominées :
+      {% for key in comparison.frontier %}{% if comparison.by_key.get(key) %}<strong>{{ comparison.by_key[key].name }}</strong>{% if not loop.last %}, {% endif %}{% endif %}{% endfor %}.
+    </p>
+    {% if comparison.frontier | length > 1 %}
+    <div class="notice notice--attention">
+      <strong class="notice__title">Aucun gagnant unique déclaré</strong>
+      <span class="notice__message">Plusieurs options présentent des avantages différents : le moteur ne désigne pas de « meilleur choix » absolu, il classe selon votre priorité et vous montre les compromis.</span>
+    </div>
+    {% endif %}
+    {% if comparison.notes %}
+      {% for note in comparison.notes %}
+      <div class="notice notice--info"><span class="notice__message">{{ note }}</span></div>
+      {% endfor %}
+    {% endif %}
+  </div>
+</div>
+
+<div class="card">
+  <div class="card__header"><span class="card__title">Fiches par option (classement selon la priorité)</span></div>
+  <div class="card__body">
+    <div data-arbitration="ranking">
+      {% for assessment in arbitration.ranking %}
+      <div class="assessment {% if loop.first %}assessment--first{% endif %}">
+        <div class="assessment__head">
+          <span class="assessment__name">{{ assessment.name }}</span>
+          <span class="assessment__rank">Rang {{ assessment.rank }}{% if assessment.composite_score %} · score combiné {{ assessment.composite_score }}/100{% endif %}</span>
+        </div>
+        <div class="assessment__lists">
+          <div>
+            <h4>Avantages</h4>
+            <ul>
+              {% for line in assessment.advantages %}<li>{{ line }}</li>{% else %}<li>Aucun avantage distinctif identifié dans les données saisies.</li>{% endfor %}
+            </ul>
+          </div>
+          <div>
+            <h4>Points de vigilance</h4>
+            <ul>
+              {% for line in assessment.disadvantages %}<li>{{ line }}</li>{% else %}<li>Aucun point de vigilance identifié.</li>{% endfor %}
+            </ul>
+          </div>
+        </div>
+        {% if assessment.facts %}
+        <ul class="assessment__facts">
+          {% for line in assessment.facts %}<li>{{ line }}</li>{% endfor %}
+        </ul>
+        {% endif %}
+      </div>
+      {% endfor %}
+    </div>
+  </div>
+</div>
+
+<div class="card">
+  <div class="card__header"><span class="card__title">Limites de la recommandation</span></div>
+  <div class="card__body">
+    <ul data-arbitration="caveats">
+      {% for line in arbitration.caveats %}<li>{{ line }}</li>{% endfor %}
+    </ul>
+  </div>
+</div>
+{% endmacro %}
+
+{% macro sensitivity_panel(analysis) %}
+<div class="card">
+  <div class="card__header">
+    <span class="card__title">Hypothèses les plus influentes</span>
+    <span class="card__subtitle">Variation de ±10 % (ou ±1 an) autour de vos hypothèses</span>
+  </div>
+  <div class="card__body">
+    <div data-sensitivity-summary>
+      {% for line in analysis.sensitivity_lines %}<p>{{ line }}</p>{% else %}<p class="muted">Sensibilité indisponible : deux options minimum sont nécessaires.</p>{% endfor %}
+    </div>
+    {% if analysis.sensitivity %}
+    <div class="table-wrap mt-1">
+      <table class="data">
+        <thead>
+          <tr>
+            <th>Hypothèse</th><th>Variation testée</th><th class="num">Effet sur l'écart de coût</th>
+            <th class="num">Effet sur l'écart d'émissions</th><th>Classement</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for item in analysis.sensitivity %}
+          <tr>
+            <td>{{ item.label }}{% if item.note %}<div class="muted small">{{ item.note }}</div>{% endif %}</td>
+            <td class="nowrap">{{ item.low_case }} → {{ item.high_case }}</td>
+            <td class="num">{{ item.cost_swing | mad(0) }}</td>
+            <td class="num">{{ item.emissions_swing | tco2e if item.emissions_swing is not none else "—" }}</td>
+            <td>{% if item.can_flip_ranking %}<span class="badge badge--warning">Peut inverser le classement</span>{% else %}<span class="badge badge--muted">Stable</span>{% endif %}</td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    {% endif %}
+  </div>
+</div>
+
+<div class="card">
+  <div class="card__header"><span class="card__title">Graphique « tornade » (effet maximal par hypothèse)</span></div>
+  <div class="card__body"><div data-chart="tornado">{{ analysis.charts.tornado | safe if analysis.charts.tornado else "" }}</div></div>
+</div>
+{% endmacro %}
+
+{% macro scenarios_panel(analysis) %}
+<div class="card">
+  <div class="card__header">
+    <span class="card__title">Scénarios prédéfinis</span>
+    <span class="card__subtitle">Hypothèses de travail explicites — jamais des prévisions</span>
+  </div>
+  <div class="table-wrap">
+    <table class="data">
+      <thead><tr><th>Scénario</th><th>Effet chiffré par rapport au scénario de base</th></tr></thead>
+      <tbody data-scenarios-body>
+        {% for scenario in analysis.scenarios %}
+          {% if scenario.summary_lines %}
+            {% for line in scenario.summary_lines %}
+            <tr>
+              {% if loop.first %}
+              <td rowspan="{{ scenario.summary_lines | length }}">
+                <strong>{{ scenario.label }}</strong>
+                <div class="muted small">{{ scenario.description }}</div>
+              </td>
+              {% endif %}
+              <td>{{ line }}</td>
+            </tr>
+            {% endfor %}
+          {% else %}
+          <tr>
+            <td><strong>{{ scenario.label }}</strong><div class="muted small">{{ scenario.description }}</div></td>
+            <td class="muted">Aucun changement chiffré par rapport au scénario de base.</td>
+          </tr>
+          {% endif %}
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+{% endmacro %}

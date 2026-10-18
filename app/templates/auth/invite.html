@@ -1,0 +1,45 @@
+{% extends "base.html" %}
+{% block title %}Invitation — {{ app_name }}{% endblock %}
+
+{% block content %}
+<h1>Invitation à rejoindre une organisation</h1>
+
+{% if error %}<div class="flash flash--danger" role="alert"><span class="flash__text">{{ error }}</span></div>{% endif %}
+
+{% if invitation %}
+  <p class="muted">
+    Vous avez été invité(e) à rejoindre <strong>{{ organization.name }}</strong>
+    avec le rôle <strong>{{ member_roles.get(invitation.role, invitation.role) }}</strong>
+    (adresse : {{ invitation.email }}).
+  </p>
+
+  {% if existing_user %}
+    <p class="info-note">Un compte existe déjà avec cette adresse : connectez-vous puis rouvrez ce lien pour rejoindre l'organisation.</p>
+    <div class="btn-row mt-2">
+      <a class="btn btn--primary" href="/login">Se connecter</a>
+    </div>
+  {% else %}
+    <form method="post" action="/invite/{{ request.path_params.token }}">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+      <div class="form-grid" style="grid-template-columns: 1fr;">
+        <label class="field">
+          <span class="field__label">Votre nom</span>
+          <input type="text" name="full_name" autocomplete="name">
+        </label>
+        <label class="field">
+          <span class="field__label">Mot de passe <span class="req">*</span></span>
+          <input type="password" name="password" autocomplete="new-password" required>
+          <span class="field__help">10 caractères minimum, avec majuscule, minuscule et chiffre.</span>
+        </label>
+        <label class="field">
+          <span class="field__label">Confirmer le mot de passe <span class="req">*</span></span>
+          <input type="password" name="password_confirm" autocomplete="new-password" required>
+        </label>
+      </div>
+      <div class="btn-row mt-2">
+        <button type="submit" class="btn btn--primary">Rejoindre l'organisation</button>
+      </div>
+    </form>
+  {% endif %}
+{% endif %}
+{% endblock %}

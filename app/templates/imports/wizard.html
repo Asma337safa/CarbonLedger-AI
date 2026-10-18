@@ -1,0 +1,160 @@
+{% extends "base.html" %}
+{% import "macros/ui.html" as ui %}
+{% block title %}Importer des dépenses — {{ app_name }}{% endblock %}
+{% block page_title %}Importer des dépenses{% endblock %}
+{% block page_subtitle %}<span class="muted small">Quatre étapes : fichier, aperçu, correspondance des colonnes, vérification puis confirmation.</span>{% endblock %}
+
+{% block content %}
+<div class="card" id="import-wizard">
+  <div class="card__body">
+    <div id="import-meta" data-app-fields="{{ app_fields_json }}" hidden></div>
+    <div class="steps" id="wizard-steps">
+      <div class="step step--active" data-step="1"><span class="step__num">1</span> Fichier</div>
+      <div class="step" data-step="2"><span class="step__num">2</span> Aperçu</div>
+      <div class="step" data-step="3"><span class="step__num">3</span> Correspondance</div>
+      <div class="step" data-step="4"><span class="step__num">4</span> Vérification et import</div>
+    </div>
+
+    {# ---------------- Étape 1 : fichier ---------------- #}
+    <section id="step-1">
+      <div class="file-drop">
+        <h3>Déposez ou choisissez votre fichier</h3>
+        <p class="muted small">Formats acceptés : {{ extensions }} — taille maximale : {{ max_upload_mb }} Mo.
+          Le premier onglet du classeur Excel est utilisé ; l'en-tête doit être en première ligne.</p>
+        <input type="file" id="import-file" accept=".csv,.xlsx,.xlsm">
+        <div class="btn-row mt-2" style="justify-content: center;">
+          <button type="button" class="btn btn--primary" id="upload-button">Analyser le fichier</button>
+        </div>
+      </div>
+      <div class="mt-2">
+        <h3>Colonnes reconnues automatiquement</h3>
+        <p class="muted small">La détection est une proposition : vous gardez la main sur la correspondance à l'étape 3.
+          Aucun facteur d'émission n'est attribué automatiquement ; une estimation n'est produite que si le fichier fournit une quantité,
+          une unité compatible et un code de facteur reconnu.</p>
+        <div class="table-wrap">
+          <table class="data">
+            <thead><tr><th>Champ de l'application</th><th>Obligatoire</th><th>Aide</th></tr></thead>
+            <tbody>
+              {% for key, meta in app_fields.items() %}
+              <tr>
+                <td class="mono">{{ key }}</td>
+                <td>{% if meta[1] %}<span class="badge badge--warning">Obligatoire</span>{% else %}<span class="muted">Facultatif</span>{% endif %}</td>
+                <td class="muted small">{{ meta[0] }}{% if meta[2] %} — {{ meta[2] }}{% endif %}</td>
+              </tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </section>
+
+    {# ---------------- Étape 2 : aperçu ---------------- #}
+    <section id="step-2" hidden>
+      <h3 id="preview-title">Aperçu du fichier</h3>
+      <div id="preview-warnings" hidden class="mb-1"></div>
+      <div class="table-wrap">
+        <table class="data" id="preview-table">
+          <thead><tr></tr></thead>
+          <tbody></tbody>
+        </table>
+      </div>
+      <p class="muted small">Les vingt premières lignes sont affichées (au maximum douze colonnes).
+        Les données restent sur votre serveur ; le fichier temporaire est supprimé après l'importation.</p>
+      <div class="btn-row mt-1">
+        <button type="button" class="btn btn--primary" id="to-mapping">Continuer : associer les colonnes</button>
+      </div>
+    </section>
+
+    {# ---------------- Étape 3 : correspondance ---------------- #}
+    <section id="step-3" hidden>
+      <h3>Correspondance colonnes → champs de l'application</h3>
+      <div class="map-grid">
+        <div class="map-row"><span class="map-row__label">Champ de l'application</span><span class="map-row__label">Colonne du fichier</span></div>
+      </div>
+      <div id="mapping-rows"></div>
+      <p class="muted small" id="mapping-note"></p>
+      <label class="checkline">
+        <input type="checkbox" id="include-duplicates">
+        <span>Importer aussi les doublons détectés (même date, même fournisseur, même montant). Par défaut, les doublons sont écartés.</span>
+      </label>
+      <div class="btn-row mt-2">
+        <button type="button" class="btn" id="back-to-preview">← Retour à l'aperçu</button>
+        <button type="button" class="btn btn--primary" id="validate-button">Vérifier les données (étape 4)</button>
+      </div>
+    </section>
+
+    {# ---------------- Étape 4 : vérification ---------------- #}
+    <section id="step-4" hidden>
+      <h3>Vérification avant importation</h3>
+      <div class="drum" id="validation-stats"></div>
+
+      <h3 class="mt-2">Problèmes détectés</h3>
+      <p class="muted small">Les lignes en erreur ne sont jamais importées. Les avertissements sont conservés dans les notes de la dépense.
+        <a id="errors-link" href="#">Télécharger la liste des problèmes (CSV)</a> pour corriger hors application.</p>
+      <div class="table-wrap">
+        <table class="data">
+          <thead><tr><th>Ligne</th><th>Niveau</th><th>Champ</th><th>Message</th></tr></thead>
+          <tbody id="issues-body"></tbody>
+        </table>
+      </div>
+      <p class="muted" id="issues-empty">Aucun problème détecté.</p>
+
+      <h3 class="mt-2">Aperçu des lignes normalisées</h3>
+      <div class="table-wrap">
+        <table class="data">
+          <thead>
+            <tr>
+              <th>Ligne</th><th>État</th><th>Date</th><th>Fournisseur</th><th>Description</th>
+              <th class="num">HT</th><th class="num">TTC</th><th>Catégorie</th><th class="num">Carbone</th>
+            </tr>
+          </thead>
+          <tbody id="validation-body"></tbody>
+        </table>
+      </div>
+
+      <div class="btn-row mt-2">
+        <button type="button" class="btn" id="back-to-mapping">← Modifier la correspondance</button>
+        <button type="button" class="btn btn--primary" id="confirm-button">Confirmer l'importation</button>
+      </div>
+      <div class="mt-1" id="confirm-summary" hidden></div>
+    </section>
+  </div>
+</div>
+
+<div class="card">
+  <div class="card__header">
+    <span class="card__title">Importations récentes</span>
+    <span class="card__subtitle">Traçabilité des fichiers traités</span>
+  </div>
+  {% if batches %}
+  <div class="table-wrap">
+    <table class="data">
+      <thead><tr><th>#</th><th>Fichier</th><th>Statut</th><th>Résumé</th><th>Date</th></tr></thead>
+      <tbody>
+        {% for batch in batches %}
+        <tr>
+          <td>{{ batch.id }}</td>
+          <td>{{ batch.filename }}</td>
+          <td>{{ ui.badge(batch.status, batch.status) }}</td>
+          <td class="muted small">
+            {% if batch.summary %}
+              {% if batch.summary.imported is defined %}Importé : {{ batch.summary.imported }} dépense(s), {{ batch.summary.carbon_created or 0 }} estimation(s) carbone.{% endif %}
+              {% if batch.summary.total_rows is defined %}Lignes analysées : {{ batch.summary.total_rows }}.{% endif %}
+              {% if batch.summary.validation is defined %}Valides : {{ batch.summary.validation.valid }}, erreurs : {{ batch.summary.validation.errors }}, doublons : {{ batch.summary.validation.duplicates }}.{% endif %}
+            {% else %}<span class="muted">—</span>{% endif %}
+          </td>
+          <td class="nowrap">{{ batch.created_at | datetimefr }}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% else %}
+  <div class="card__body"><p class="muted">Aucune importation pour le moment.</p></div>
+  {% endif %}
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script src="/static/js/import.js" defer></script>
+{% endblock %}

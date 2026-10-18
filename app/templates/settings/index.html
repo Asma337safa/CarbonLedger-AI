@@ -1,0 +1,604 @@
+{% extends "base.html" %}
+{% import "macros/ui.html" as ui %}
+{% block title %}Paramètres — {{ app_name }}{% endblock %}
+{% block page_title %}Paramètres{% endblock %}
+{% block page_subtitle %}
+<span class="muted small">
+  Entreprise, équipe, facteurs d'émission, assistant IA, données et journal d'activité.
+</span>
+{% endblock %}
+
+{% set is_admin = ctx.role in ('proprietaire', 'administrateur') %}
+
+{% block content %}
+
+<div class="tabs">
+  <a class="tab {% if tab == 'entreprise' %}tab--active{% endif %}" href="/settings?tab=entreprise">Entreprise</a>
+  <a class="tab {% if tab == 'membres' %}tab--active{% endif %}" href="/settings?tab=membres">Équipe</a>
+  <a class="tab {% if tab == 'facteurs' %}tab--active{% endif %}" href="/settings?tab=facteurs">Facteurs d'émission</a>
+  <a class="tab {% if tab == 'ia' %}tab--active{% endif %}" href="/settings?tab=ia">Assistant IA</a>
+  <a class="tab {% if tab == 'donnees' %}tab--active{% endif %}" href="/settings?tab=donnees">Données</a>
+  <a class="tab {% if tab == 'audit' %}tab--active{% endif %}" href="/settings?tab=audit">Journal d'activité</a>
+</div>
+
+{% if tab == 'entreprise' %}
+<div class="grid grid--sidebar">
+  <div>
+    <div class="card">
+      <div class="card__header">
+        <span class="card__title">Identité de l'entreprise</span>
+        <span class="card__subtitle">Utilisée dans les rapports et les exports</span>
+      </div>
+      <div class="card__body">
+        {% if is_admin %}
+        <form method="post" action="/settings/organization">
+          <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+          <div class="form-grid">
+            <label class="field span-2">
+              <span class="field__label">Raison sociale <span class="req" aria-hidden="true">*</span></span>
+              <input type="text" name="name" value="{{ ctx.organization.name }}" required>
+            </label>
+            <label class="field">
+              <span class="field__label">ICE (Identifiant Commun de l'Entreprise)</span>
+              <input type="text" name="ice" value="{{ ctx.organization.ice }}" maxlength="20">
+            </label>
+            <label class="field">
+              <span class="field__label">Secteur d'activité</span>
+              <input type="text" name="sector" value="{{ ctx.organization.sector }}" placeholder="Ex. : agroalimentaire">
+            </label>
+            <label class="field">
+              <span class="field__label">Taille de l'entreprise</span>
+              <input type="text" name="company_size" value="{{ ctx.organization.company_size }}" placeholder="Ex. : 45 salariés">
+            </label>
+            <label class="field">
+              <span class="field__label">Prix interne du carbone (DH/t CO₂e)</span>
+              <input type="number" name="internal_carbon_price" min="0" step="1" value="{{ ctx.organization.internal_carbon_price }}">
+              <span class="field__help">Valeur par défaut proposée dans le comparateur. Hypothèse de décision, non une charge comptable.</span>
+            </label>
+          </div>
+          <div class="btn-row mt-1">
+            <button type="submit" class="btn btn--primary">Enregistrer</button>
+          </div>
+        </form>
+        {% else %}
+        <div class="kv-strip">
+          <span>Raison sociale : <strong>{{ ctx.organization.name }}</strong></span>
+          <span>ICE : <strong>{{ ctx.organization.ice or "—" }}</strong></span>
+          <span>Secteur : <strong>{{ ctx.organization.sector or "—" }}</strong></span>
+          <span>Taille : <strong>{{ ctx.organization.company_size or "—" }}</strong></span>
+          <span>Prix interne du carbone : <strong>{{ ctx.organization.internal_carbon_price | mad(0) }}</strong></span>
+        </div>
+        <div class="notice notice--info mt-1">
+          <strong class="notice__title">Lecture seule</strong>
+          <span class="notice__message">Seuls les propriétaires et administrateurs peuvent modifier ces informations.</span>
+        </div>
+        {% endif %}
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="card__header"><span class="card__title">Votre accès</span></div>
+      <div class="card__body">
+        <div class="kv-strip">
+          <span>Utilisateur : <strong>{{ ctx.user.full_name or ctx.user.email }}</strong></span>
+          <span>E-mail : <strong>{{ ctx.user.email }}</strong></span>
+          <span>Rôle : <strong>{{ member_roles.get(ctx.role, ctx.role) }}</strong></span>
+          <span>Devise : <strong>{{ ctx.organization.currency }} (DH)</strong></span>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div>
+    <div class="card">
+      <div class="card__header"><span class="card__title">Conventions de l'espace</span></div>
+      <div class="card__body">
+        <ul class="list-check">
+          <li><span>Devise unique : dirham marocain (DH)</span></li>
+          <li><span>Toutes les données sont rattachées à votre organisation</span></li>
+          <li><span>Les facteurs du catalogue global sont en lecture seule</span></li>
+          <li><span>Aucune donnée n'est partagée entre entreprises</span></li>
+        </ul>
+      </div>
+    </div>
+  </div>
+</div>
+
+{% elif tab == 'membres' %}
+<div class="grid grid--sidebar">
+  <div>
+    <div class="card">
+      <div class="card__header">
+        <span class="card__title">Membres de l'organisation</span>
+        <span class="card__subtitle">{{ members | length }} membre(s)</span>
+      </div>
+      <div class="table-wrap">
+        <table class="data">
+          <thead>
+            <tr><th>Nom</th><th>E-mail</th><th>Rôle</th><th>Depuis</th><th></th></tr>
+          </thead>
+          <tbody>
+            {% for member in members %}
+            <tr>
+              <td>
+                <strong>{{ member.user.full_name or "—" }}</strong>
+                {% if member.user_id == ctx.user.id %}<span class="badge badge--info">vous</span>{% endif %}
+              </td>
+              <td>{{ member.user.email }}</td>
+              <td>
+                {% if is_admin and member.user_id != ctx.user.id %}
+                <form method="post" action="/settings/members/{{ member.id }}/role" class="table-actions">
+                  <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+                  <select name="role">
+                    {% for key, label in member_roles.items() %}
+                    <option value="{{ key }}" {% if key == member.role %}selected{% endif %}>{{ label }}</option>
+                    {% endfor %}
+                  </select>
+                  <button type="submit" class="btn btn--small">Mettre à jour</button>
+                </form>
+                {% else %}
+                {{ ui.badge(member.role, member_roles.get(member.role, member.role)) }}
+                {% endif %}
+              </td>
+              <td class="nowrap">{{ member.created_at | datefr }}</td>
+              <td class="nowrap">
+                {% if is_admin and member.user_id != ctx.user.id %}
+                <form method="post" action="/settings/members/{{ member.id }}/remove"
+                      data-confirm="Retirer l'accès de {{ member.user.email }} à cette organisation ?">
+                  <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+                  <button type="submit" class="btn btn--small btn--danger">Retirer</button>
+                </form>
+                {% endif %}
+              </td>
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    </div>
+
+    {% if invitations %}
+    <div class="card">
+      <div class="card__header">
+        <span class="card__title">Invitations en attente</span>
+        <span class="card__subtitle">Valides 7 jours</span>
+      </div>
+      <div class="table-wrap">
+        <table class="data">
+          <thead><tr><th>E-mail</th><th>Rôle prévu</th><th>Expire le</th></tr></thead>
+          <tbody>
+            {% for invitation in invitations %}
+            <tr>
+              <td>{{ invitation.email }}</td>
+              <td>{{ member_roles.get(invitation.role, invitation.role) }}</td>
+              <td class="nowrap">{{ invitation.expires_at | datefr }}</td>
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+      <div class="card__footer muted small">
+        L'envoi d'e-mails n'est pas configuré : le lien d'invitation s'affiche dans le message de confirmation
+        après la création, à transmettre vous-même au destinataire.
+      </div>
+    </div>
+    {% endif %}
+  </div>
+
+  <div>
+    <div class="card">
+      <div class="card__header"><span class="card__title">Inviter une personne</span></div>
+      <div class="card__body">
+        {% if is_admin %}
+        <form method="post" action="/settings/members/invite">
+          <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+          <div class="form-grid">
+            <label class="field span-2">
+              <span class="field__label">Adresse e-mail <span class="req" aria-hidden="true">*</span></span>
+              <input type="email" name="email" required placeholder="prenom.nom@entreprise.ma">
+            </label>
+            <label class="field span-2">
+              <span class="field__label">Rôle</span>
+              <select name="role">
+                {% for key, label in member_roles.items() %}
+                <option value="{{ key }}" {% if key == 'membre' %}selected{% endif %}>{{ label }}</option>
+                {% endfor %}
+              </select>
+            </label>
+          </div>
+          <div class="btn-row mt-1">
+            <button type="submit" class="btn btn--primary btn--small">Créer l'invitation</button>
+          </div>
+        </form>
+        {% else %}
+        <p class="muted small">Seuls les propriétaires et administrateurs peuvent inviter des membres.</p>
+        {% endif %}
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="card__header"><span class="card__title">Droits par rôle</span></div>
+      <div class="card__body">
+        <ul class="list-check">
+          <li><span>Propriétaire — tous les droits, y compris la suppression de l'espace</span></li>
+          <li><span>Administrateur — paramètres, équipe, facteurs</span></li>
+          <li><span>Membre — saisie, import, comparaisons, rapports</span></li>
+          <li><span>Lecteur — consultation et exports uniquement</span></li>
+        </ul>
+      </div>
+    </div>
+  </div>
+</div>
+
+{% elif tab == 'facteurs' %}
+<div class="card">
+  <div class="card__header">
+    <span class="card__title">Catalogue des facteurs d'émission</span>
+    <span class="card__subtitle">{{ factors | length }} facteur(s) disponible(s) — le catalogue global est en lecture seule</span>
+  </div>
+  <div class="table-wrap">
+    <table class="data">
+      <thead>
+        <tr>
+          <th>Code</th><th>Libellé</th><th class="num">kg CO₂e / unité</th><th>Unité</th>
+          <th>Périmètre</th><th>Méthode</th><th>Confiance</th><th>Source</th><th>Validité</th><th>Origine</th><th></th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for factor in factors %}
+        <tr>
+          <td><strong>{{ factor.code }}</strong></td>
+          <td>
+            {{ factor.label }}
+            <div class="muted small">{{ carbon_categories.get(factor.category, factor.category) }}</div>
+            {% if factor.calculation_note %}<div class="muted small">{{ factor.calculation_note }}</div>{% endif %}
+          </td>
+          <td class="num">{{ factor.kgco2e_per_unit | num(4) }}</td>
+          <td>{{ factor.unit }}</td>
+          <td><span class="badge badge--muted">{{ scopes.get(factor.scope, factor.scope) }}</span></td>
+          <td>{{ emission_methods.get(factor.method, factor.method) }}</td>
+          <td>{{ ui.badge(factor.confidence, confidence_levels.get(factor.confidence, factor.confidence)) }}</td>
+          <td>
+            {{ factor.source_name or "non documentée" }}
+            {% if factor.source_version %}<div class="muted small">{{ factor.source_version }}</div>{% endif %}
+            {% if factor.source_url %}<div class="small"><a href="{{ factor.source_url }}" rel="noopener noreferrer" target="_blank">consulter la source</a></div>{% endif %}
+          </td>
+          <td class="nowrap">
+            {% if factor.valid_from %}{{ factor.valid_from | datefr }}{% else %}—{% endif %}
+            →
+            {% if factor.valid_until %}{{ factor.valid_until | datefr }}{% else %}—{% endif %}
+          </td>
+          <td>
+            {% if factor.organization_id %}Votre facteur{% else %}Catalogue CarbonLedger{% endif %}
+            {{ ui.demo_badge(factor.is_demo) }}
+          </td>
+          <td class="nowrap">
+            {% if factor.organization_id and ctx.role in ('proprietaire', 'administrateur', 'membre') %}
+            <form method="post" action="/settings/factors/{{ factor.id }}/delete"
+                  data-confirm="Supprimer ce facteur personnalisé ? Les enregistrements carbone qui l'utilisent l'empêcheront.">
+              <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+              <button type="submit" class="btn btn--small btn--danger">Supprimer</button>
+            </form>
+            {% endif %}
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  <div class="card__footer muted small">
+    Un facteur d'émission est toujours publié avec sa source, son unité, son périmètre et sa période de validité.
+    L'application n'attribue jamais un facteur automatiquement : la sélection reste votre décision.
+  </div>
+</div>
+
+{% if ctx.role in ('proprietaire', 'administrateur', 'membre') %}
+<div class="card">
+  <div class="card__header">
+    <span class="card__title">Ajouter un facteur personnalisé</span>
+    <span class="card__subtitle">Documents internes, fournisseurs, analyses de cycle de vie</span>
+  </div>
+  <div class="card__body">
+    <form method="post" action="/settings/factors">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+      <div class="form-grid form-grid--3">
+        <label class="field">
+          <span class="field__label">Code <span class="req" aria-hidden="true">*</span></span>
+          <input type="text" name="code" required placeholder="Ex. : CARBURE_BIO_2026">
+        </label>
+        <label class="field span-2">
+          <span class="field__label">Libellé <span class="req" aria-hidden="true">*</span></span>
+          <input type="text" name="label" required placeholder="Ex. : Granulés de bois — filière locale">
+        </label>
+        <label class="field">
+          <span class="field__label">Unité d'activité <span class="req" aria-hidden="true">*</span></span>
+          <input type="text" name="unit" list="unit-options" required placeholder="kWh">
+          <datalist id="unit-options">
+            {% for key, label in units.items() %}
+            <option value="{{ key }}">{{ label }}</option>
+            {% endfor %}
+          </datalist>
+        </label>
+        <label class="field">
+          <span class="field__label">Valeur (kg CO₂e par unité) <span class="req" aria-hidden="true">*</span></span>
+          <input type="number" name="kgco2e_per_unit" min="0" step="0.000001" required>
+        </label>
+        <label class="field">
+          <span class="field__label">Catégorie</span>
+          <select name="category">
+            {% for key, label in carbon_categories.items() %}
+            <option value="{{ key }}">{{ label }}</option>
+            {% endfor %}
+          </select>
+        </label>
+        <label class="field">
+          <span class="field__label">Périmètre</span>
+          <select name="scope">
+            {% for key, label in scopes.items() %}
+            <option value="{{ key }}" {% if key == '3' %}selected{% endif %}>{{ label }}</option>
+            {% endfor %}
+          </select>
+        </label>
+        <label class="field">
+          <span class="field__label">Méthode</span>
+          <select name="method">
+            {% for key, label in emission_methods.items() %}
+            <option value="{{ key }}" {% if key == 'calcule' %}selected{% endif %}>{{ label }}</option>
+            {% endfor %}
+          </select>
+        </label>
+        <label class="field">
+          <span class="field__label">Confiance</span>
+          <select name="confidence">
+            {% for key, label in confidence_levels.items() %}
+            <option value="{{ key }}" {% if key == 'moyenne' %}selected{% endif %}>{{ label }}</option>
+            {% endfor %}
+          </select>
+        </label>
+        <label class="field">
+          <span class="field__label">Valide du</span>
+          <input type="date" name="valid_from">
+        </label>
+        <label class="field">
+          <span class="field__label">Valide au</span>
+          <input type="date" name="valid_until">
+        </label>
+        <label class="field">
+          <span class="field__label">Zone géographique</span>
+          <input type="text" name="geography" maxlength="16" placeholder="MA">
+        </label>
+        <label class="field span-2">
+          <span class="field__label">Source (organisme, étude, fournisseur) <span class="req" aria-hidden="true">*</span></span>
+          <input type="text" name="source_name" required placeholder="Ex. : ADEME Base Empreinte 2025 — fiche granulés bois">
+        </label>
+        <label class="field">
+          <span class="field__label">Version de la source</span>
+          <input type="text" name="source_version" maxlength="60" placeholder="2025.1">
+        </label>
+        <label class="field span-3">
+          <span class="field__label">Lien vers la source</span>
+          <input type="url" name="source_url" placeholder="https://…">
+        </label>
+        <label class="field span-3">
+          <span class="field__label">Note de calcul</span>
+          <textarea name="calculation_note" rows="2" placeholder="Formule ou conversion utilisée, arrondis, limites…"></textarea>
+          <span class="field__help">Exemple : « PCI 4,8 kWh/kg × 0,016 kg CO₂e/kWh (dont 0,011 renouvelable exclu) = … »</span>
+        </label>
+      </div>
+      <div class="btn-row mt-1">
+        <button type="submit" class="btn btn--primary">Ajouter le facteur</button>
+      </div>
+    </form>
+  </div>
+</div>
+{% endif %}
+
+{% elif tab == 'ia' %}
+<div class="grid grid--sidebar">
+  <div>
+    <div class="card">
+      <div class="card__header">
+        <span class="card__title">Assistant CarbonLedger Copilot</span>
+        {% if ai_configured %}{{ ui.badge('success', 'IA configurée') }}{% else %}{{ ui.badge('muted', 'Mode démonstration') }}{% endif %}
+      </div>
+      <div class="card__body">
+        {% if ai_configured %}
+        <div class="kv-strip">
+          <span>Modèle : <strong>{{ ai_model }}</strong></span>
+          <span>URL de base : <strong>{{ ai_base_url }}</strong></span>
+          <span>Clé API : <strong>configurée</strong></span>
+        </div>
+        <p class="muted small mt-1">
+          Le modèle reçoit un instantané JSON des données calculées et des règles strictes : ne jamais inventer de
+          chiffre, distinguer faits, estimations et recommandations, signaler les données manquantes.
+        </p>
+        {% if is_admin %}
+        <form method="post" action="/settings/ai/test">
+          <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+          <div class="btn-row">
+            <button type="submit" class="btn btn--primary btn--small">Tester la connexion</button>
+            <a class="btn btn--small" href="/copilot">Ouvrir l'assistant</a>
+          </div>
+        </form>
+        {% endif %}
+        {% else %}
+        <p class="small">
+          Aucune clé API n'est configurée. L'assistant fonctionne en <strong>mode démonstration</strong> : des règles
+          déterministes répondent à partir des données enregistrées, sans appel réseau.
+        </p>
+        <div class="notice notice--info">
+          <strong class="notice__title">Activer le mode IA (facultatif)</strong>
+          <span class="notice__message">
+            Renseignez <code>CARBONLEDGER_AI_API_KEY</code> (et, si besoin, <code>CARBONLEDGER_AI_MODEL</code> et
+            <code>CARBONLEDGER_AI_BASE_URL</code>) dans le fichier <code>.env</code>, puis redémarrez l'application.
+          </span>
+        </div>
+        {% endif %}
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="card__header"><span class="card__title">Garanties de calcul</span></div>
+      <div class="card__body">
+        <ul class="list-check">
+          <li><span>Les calculs de coûts, d'émissions et d'arbitrage sont déterministes et testés</span></li>
+          <li><span>Le modèle ne calcule rien : il commente des chiffres déjà calculés</span></li>
+          <li><span>En cas d'échec réseau, la réponse bascule en mode démonstration</span></li>
+          <li><span>Chaque question posée est journalisée (mode, extrait de question)</span></li>
+        </ul>
+      </div>
+    </div>
+  </div>
+
+  <div>
+    <div class="card">
+      <div class="card__header"><span class="card__title">Confidentialité</span></div>
+      <div class="card__body">
+        <p class="muted small">
+          En mode IA, un instantané agrégé de vos données (montants par catégorie, émissions par poste, options des
+          projets récents) est transmis au fournisseur du modèle que vous configurez. Sans clé API, aucune donnée
+          ne quitte l'application.
+        </p>
+      </div>
+    </div>
+  </div>
+</div>
+
+{% elif tab == 'donnees' %}
+<div class="grid grid--sidebar">
+  <div>
+    <div class="card">
+      <div class="card__header">
+        <span class="card__title">Jeu de démonstration</span>
+        {% if ctx.organization.demo_data_loaded %}{{ ui.badge('warning', 'Chargé') }}{% else %}{{ ui.badge('muted', 'Non chargé') }}{% endif %}
+      </div>
+      <div class="card__body">
+        <p class="muted small">
+          Le jeu de démonstration crée des dépenses, des enregistrements carbone et trois projets de décision
+          (dont la comparaison de référence du cahier des charges : 200 000 DH / 60 t CO₂e contre
+          180 000 DH / 35 t CO₂e sur 5 ans). Toutes les lignes créées sont marquées « Démo » et peuvent être supprimées
+          en un clic.
+        </p>
+        <div class="kv-strip">
+          <span>Dépenses : <strong>{{ counts.expenses }}</strong></span>
+          <span>Registre carbone : <strong>{{ counts.carbon }}</strong></span>
+          <span>Projets : <strong>{{ counts.projects }}</strong></span>
+          <span>Rapports : <strong>{{ counts.reports }}</strong></span>
+        </div>
+        {% if ctx.role in ('proprietaire', 'administrateur', 'membre') %}
+        <div class="btn-row mt-1">
+          <form method="post" action="/settings/demo-data">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+            <input type="hidden" name="action" value="load">
+            <button type="submit" class="btn btn--primary btn--small">Charger les données de démonstration</button>
+          </form>
+          <form method="post" action="/settings/demo-data"
+                data-confirm="Supprimer toutes les données de démonstration (dépenses, carbone, projets) ? Vos données réelles ne seront pas touchées.">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+            <input type="hidden" name="action" value="delete">
+            <button type="submit" class="btn btn--small btn--danger">Supprimer les données « Démo »</button>
+          </form>
+        </div>
+        {% endif %}
+      </div>
+      <div class="card__footer muted small">
+        Les données de démonstration doivent être supprimées avant tout usage réel : elles sont fictives.
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="card__header"><span class="card__title">Portabilité et sauvegarde</span></div>
+      <div class="card__body">
+        <div class="btn-row">
+          <a class="btn btn--primary" href="/settings/export.json">Exporter toutes mes données (JSON)</a>
+          <a class="btn" href="/reports">Générer un rapport PDF / Excel</a>
+        </div>
+        <p class="muted small mt-1">
+          L'export JSON contient l'entreprise, les dépenses, le registre carbone, les décisions et les facteurs
+          utilisés avec leurs sources : il sert de sauvegarde et de support d'audit.
+        </p>
+      </div>
+    </div>
+
+    {% if is_admin %}
+    <div class="card">
+      <div class="card__header"><span class="card__title">Zone sensible</span></div>
+      <div class="card__body">
+        <div class="notice notice--danger">
+          <strong class="notice__title">Supprimer l'organisation et toutes ses données</strong>
+          <span class="notice__message">
+            Cette action supprime définitivement les dépenses, le registre carbone, les projets de décision,
+            les scénarios, les rapports et les membres. Elle est irréversible.
+          </span>
+        </div>
+        <form method="post" action="/settings/organization/delete">
+          <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+          <div class="form-grid">
+            <label class="field">
+              <span class="field__label">Saisissez « SUPPRIMER » pour confirmer <span class="req" aria-hidden="true">*</span></span>
+              <input type="text" name="confirmation" required placeholder="SUPPRIMER">
+            </label>
+          </div>
+          <div class="btn-row mt-1">
+            <button type="submit" class="btn btn--danger">Supprimer définitivement l'organisation</button>
+          </div>
+        </form>
+      </div>
+    </div>
+    {% endif %}
+  </div>
+
+  <div>
+    <div class="card">
+      <div class="card__header"><span class="card__title">Où sont stockées les données ?</span></div>
+      <div class="card__body">
+        <ul class="list-check">
+          <li><span>Base de données locale (SQLite, migration PostgreSQL possible)</span></li>
+          <li><span>Fichiers importés et rapports dans le dossier de données</span></li>
+          <li><span>Chemins configurables via les variables <code>CARBONLEDGER_*</code></span></li>
+        </ul>
+        <p class="muted small mt-1">
+          Sauvegardez régulièrement la base et le dossier de données (voir <code>DEPLOYMENT.md</code>).
+        </p>
+      </div>
+    </div>
+  </div>
+</div>
+
+{% else %}
+<div class="card">
+  <div class="card__header">
+    <span class="card__title">Journal d'activité</span>
+    <span class="card__subtitle">{{ audit_logs | length }} événement(s) récents — traçabilité des actions sensibles</span>
+  </div>
+  {% if audit_logs %}
+  <div class="table-wrap">
+    <table class="data">
+      <thead>
+        <tr><th>Date</th><th>Action</th><th>Objet</th><th>Détails</th><th>Utilisateur</th><th>Adresse IP</th></tr>
+      </thead>
+      <tbody>
+        {% for log in audit_logs %}
+        <tr>
+          <td class="nowrap">{{ log.created_at | datetimefr }}</td>
+          <td><strong>{{ log.action }}</strong></td>
+          <td>{{ log.entity_type or "—" }}{% if log.entity_id %} #{{ log.entity_id }}{% endif %}</td>
+          <td class="small">{{ log.details | tojson }}</td>
+          <td>{% if log.user_id %}Utilisateur #{{ log.user_id }}{% else %}—{% endif %}</td>
+          <td class="muted small">{{ log.ip or "—" }}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  <div class="card__footer muted small">
+    Le journal conserve les créations, modifications, exports, suppressions et changements de rôle.
+    Les questions posées à l'assistant y figurent également (mode et extrait).
+  </div>
+  {% else %}
+  <div class="card__body"><p class="muted">Aucun événement enregistré pour le moment.</p></div>
+  {% endif %}
+</div>
+{% endif %}
+
+{% endblock %}

@@ -1,0 +1,81 @@
+{% extends "base.html" %}
+{% import "macros/ui.html" as ui %}
+{% block title %}Comparateur de décisions — {{ app_name }}{% endblock %}
+{% block page_title %}Comparateur de décisions{% endblock %}
+{% block page_subtitle %}<span class="muted small">{{ count }} projet(s) — coûts cumulés, émissions cumulées et coût par tonne évitée</span>{% endblock %}
+
+{% block content %}
+<div class="btn-row between mb-2">
+  <div class="pill-nav">
+    <a class="pill {% if not status_filter %}pill--active{% endif %}" href="/decisions">Tous</a>
+    {% for key, label in project_statuses.items() %}
+    <a class="pill {% if status_filter == key %}pill--active{% endif %}" href="/decisions?status={{ key }}">{{ label }}</a>
+    {% endfor %}
+  </div>
+  <div class="btn-row">
+    <a class="btn btn--primary" href="/decisions/new">Nouvelle comparaison</a>
+  </div>
+</div>
+
+{% if cards %}
+<div class="grid grid--2">
+  {% for card in cards %}
+  {% set project = card.project %}
+  <div class="card mb-0">
+    <div class="card__header">
+      <div>
+        <div class="card__title"><a href="/decisions/{{ project.id }}">{{ project.title }}</a> {{ ui.demo_badge(project.is_demo) }}</div>
+        <div class="card__subtitle">
+          {{ expense_categories.get(project.category, project.category) }} · horizon {{ project.horizon_years }} ans ·
+          priorité : {{ priorities.get(project.priority, project.priority) }}
+        </div>
+      </div>
+      {{ ui.badge(project.status, project_statuses.get(project.status, project.status)) }}
+    </div>
+    <div class="card__body">
+      {% if project.description %}<p class="muted small">{{ project.description }}</p>{% endif %}
+      {% if card.error %}
+        <div class="notice notice--attention"><strong class="notice__title">Comparaison indisponible</strong><span class="notice__message">{{ card.error }}</span></div>
+      {% else %}
+        <div class="kv-strip">
+          <span>Option la moins chère : <strong>{{ card.figures.cheapest or "—" }}</strong>{% if card.figures.cheapest_cost %} ({{ card.figures.cheapest_cost | mad(0) }}){% endif %}</span>
+        </div>
+        <div class="kv-strip mt-1">
+          <span>Moins émettrice : <strong>{{ card.figures.greenest or "émissions non renseignées" }}</strong>{% if card.figures.greenest_emissions %} ({{ card.figures.greenest_emissions | tco2e }}){% endif %}</span>
+        </div>
+        <p class="small mt-1">{{ card.figures.headline }}</p>
+        {% if card.figures.frontier > 1 %}
+        <p class="muted small">{{ card.figures.frontier }} options restent en frontière de compromis : aucun gagnant unique n'est déclaré.</p>
+        {% endif %}
+      {% endif %}
+    </div>
+    <div class="card__footer">
+      <div class="btn-row">
+        <a class="btn btn--small btn--primary" href="/decisions/{{ project.id }}">Ouvrir</a>
+        <a class="btn btn--small" href="/decisions/{{ project.id }}/edit">Modifier</a>
+        <a class="btn btn--small" href="/decisions/{{ project.id }}/report.pdf">Rapport PDF</a>
+        <a class="btn btn--small" href="/decisions/{{ project.id }}/export.csv">CSV</a>
+        <span class="grow"></span>
+        <form method="post" action="/decisions/{{ project.id }}/delete" data-confirm="Supprimer ce projet, ses options, ses scénarios et ses recommandations ?">
+          <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+          <button type="submit" class="btn btn--small btn--danger">Supprimer</button>
+        </form>
+      </div>
+    </div>
+  </div>
+  {% endfor %}
+</div>
+{% else %}
+  {{ ui.empty_state(
+      "Aucune comparaison enregistrée",
+      "Le comparateur est le cœur de CarbonLedger : décrivez au moins deux options (fournisseurs, équipements, solutions) pour obtenir coûts cumulés, émissions cumulées et coût par tonne de CO₂e évitée.",
+      "/decisions/new",
+      "Créer une comparaison"
+  ) }}
+{% endif %}
+
+<p class="muted small">
+  Méthode : coût total = acquisition + transport + Σ (fonctionnement + maintenance − économies) sur l'horizon commun.
+  Coût par tonne évitée = écart de coût ÷ écart d'émissions (valeur négative = gain double, à lire comme un indicateur de compromis).
+</p>
+{% endblock %}

@@ -1,0 +1,130 @@
+{% extends "base.html" %}
+{% import "macros/ui.html" as ui %}
+{% block title %}Nouvelle donnée carbone — {{ app_name }}{% endblock %}
+{% block page_title %}Nouvelle donnée carbone{% endblock %}
+{% block page_subtitle %}<span class="muted small">Émissions (kg CO₂e) = quantité d'activité × facteur d'émission documenté.</span>{% endblock %}
+
+{% block content %}
+{% set f = form or {} %}
+<form method="post" action="/carbon" class="js-carbon-form">
+  <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+
+  <div class="card">
+    <div class="card__header"><span class="card__title">Activité et quantité</span></div>
+    <div class="card__body">
+      <div class="form-grid form-grid--4">
+        <label class="field">
+          <span class="field__label">Poste carbone <span class="req">*</span></span>
+          <select name="category" required>
+            {% for key, label in carbon_categories.items() %}
+            <option value="{{ key }}" {% if key == (f.get('category') or 'energie') %}selected{% endif %}>{{ label }}</option>
+            {% endfor %}
+          </select>
+        </label>
+        <label class="field">
+          <span class="field__label">Début de période <span class="req">*</span></span>
+          <input type="date" name="period_start" value="{{ f.get('period_start') or '' }}" required>
+        </label>
+        <label class="field">
+          <span class="field__label">Fin de période</span>
+          <input type="date" name="period_end" value="{{ f.get('period_end') or '' }}">
+          <span class="field__help">Laissez vide si la donnée porte sur un seul jour.</span>
+        </label>
+        <label class="field">
+          <span class="field__label">Quantité d'activité <span class="req">*</span></span>
+          <input type="text" name="quantity" value="{{ f.get('quantity') or '' }}" placeholder="Ex. 12000" inputmode="decimal" required>
+        </label>
+        <label class="field">
+          <span class="field__label">Unité <span class="req">*</span></span>
+          <select name="unit" required>
+            <option value="">— Choisir —</option>
+            {% for key, label in units.items() %}
+            <option value="{{ key }}" {% if key == (f.get('unit') or '') %}selected{% endif %}>{{ key }} — {{ label }}</option>
+            {% endfor %}
+          </select>
+        </label>
+        <label class="field span-2">
+          <span class="field__label">Facteur d'émission documenté <span class="req">*</span></span>
+          <select name="factor_id" id="factor-select" required>
+            <option value="">— Choisir un facteur —</option>
+            {% for factor in factors %}
+            <option value="{{ factor.id }}"
+                    data-unit="{{ factor.unit }}"
+                    data-value="{{ factor.kgco2e_per_unit }}"
+                    data-code="{{ factor.code }}"
+                    data-label="{{ factor.label }}"
+                    data-source="{{ factor.source_name }}"
+                    data-scope="{{ scopes.get(factor.scope, factor.scope) }}"
+                    data-method="{{ emission_methods.get(factor.method, factor.method) }}"
+                    data-confidence="{{ confidence_levels.get(factor.confidence, factor.confidence) }}"
+                    data-valid-from="{{ factor.valid_from | datefr if factor.valid_from else '' }}"
+                    data-valid-until="{{ factor.valid_until | datefr if factor.valid_until else '' }}"
+                    data-note="{{ factor.calculation_note }}"
+                    {% if f.get('factor_id') and factor.id | string == (f.get('factor_id') | string) %}selected{% endif %}>
+              {{ factor.code }} — {{ factor.label }} ({{ factor.kgco2e_per_unit }} kgCO₂e/{{ factor.unit }}) — {{ factor.source_name }}
+            </option>
+            {% endfor %}
+          </select>
+          <span class="field__help">Seuls les facteurs du catalogue global et de votre organisation sont proposés. L'unité choisie doit être compatible avec celle du facteur.</span>
+        </label>
+      </div>
+
+      <div id="factor-hint" class="info-note mt-1" hidden></div>
+
+      <div class="btn-row mt-1">
+        <button type="button" class="btn btn--secondary" id="carbon-preview-button">Vérifier le calcul</button>
+        <span class="muted small">L'aperçu n'enregistre rien : il affiche la formule et la conversion d'unité.</span>
+      </div>
+      <div id="carbon-preview" class="mt-1" hidden></div>
+    </div>
+  </div>
+
+  <div class="card">
+    <div class="card__header"><span class="card__title">Qualification de la donnée</span></div>
+    <div class="card__body">
+      <div class="form-grid form-grid--3">
+        <label class="field">
+          <span class="field__label">Méthode</span>
+          <select name="method">
+            <option value="">— Celle du facteur —</option>
+            {% for key, label in emission_methods.items() %}
+            <option value="{{ key }}" {% if key == (f.get('method') or '') %}selected{% endif %}>{{ label }}</option>
+            {% endfor %}
+          </select>
+        </label>
+        <label class="field">
+          <span class="field__label">Statut de la donnée</span>
+          <select name="status">
+            <option value="">— Déduit de la méthode —</option>
+            {% for key, label in carbon_statuses.items() %}
+            <option value="{{ key }}" {% if key == (f.get('status') or '') %}selected{% endif %}>{{ label }}</option>
+            {% endfor %}
+          </select>
+        </label>
+        <label class="field">
+          <span class="field__label">Confiance</span>
+          <select name="confidence">
+            <option value="">— Celle du facteur —</option>
+            {% for key, label in confidence_levels.items() %}
+            <option value="{{ key }}" {% if key == (f.get('confidence') or '') %}selected{% endif %}>{{ label }}</option>
+            {% endfor %}
+          </select>
+        </label>
+        <label class="field span-3">
+          <span class="field__label">Notes et source</span>
+          <textarea name="notes" rows="2" placeholder="Ex. relevé compteur, facture n°…, hypothèse de calcul…">{{ f.get('notes') or '' }}</textarea>
+        </label>
+      </div>
+    </div>
+  </div>
+
+  <div class="btn-row">
+    <button type="submit" class="btn btn--primary">Enregistrer la donnée carbone</button>
+    <a class="btn" href="/carbon">Annuler</a>
+  </div>
+</form>
+{% endblock %}
+
+{% block scripts %}
+<script src="/static/js/carbon.js" defer></script>
+{% endblock %}

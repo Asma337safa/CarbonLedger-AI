@@ -1,0 +1,142 @@
+{% extends "base.html" %}
+{% import "macros/ui.html" as ui %}
+{% block title %}Dépenses — {{ app_name }}{% endblock %}
+{% block page_title %}Dépenses{% endblock %}
+{% block page_subtitle %}<span class="muted small">{{ total_count }} ligne(s) — {{ period_label }}</span>{% endblock %}
+
+{% block content %}
+<div class="btn-row mb-2">
+  <a class="btn btn--primary" href="/expenses/new">Saisir une dépense</a>
+  <a class="btn" href="/imports">Importer un fichier</a>
+  <a class="btn" href="/expenses/export.csv?period={{ period_choice | urlencode }}&category={{ filters.category | urlencode }}&supplier={{ filters.supplier | urlencode }}&status={{ filters.status | urlencode }}">Exporter en CSV</a>
+</div>
+
+<form class="card" method="get" action="/expenses">
+  <div class="card__body">
+    <div class="filters">
+      <label class="field">
+        <span class="field__label">Période</span>
+        <select name="period">
+          {% for key, label in period_presets.items() %}
+          <option value="{{ key }}" {% if key == period_choice %}selected{% endif %}>{{ label }}</option>
+          {% endfor %}
+        </select>
+      </label>
+      <label class="field">
+        <span class="field__label">Catégorie</span>
+        <select name="category">
+          <option value="">Toutes</option>
+          {% for key, label in expense_categories.items() %}
+          <option value="{{ key }}" {% if key == filters.category %}selected{% endif %}>{{ label }}</option>
+          {% endfor %}
+        </select>
+      </label>
+      <label class="field">
+        <span class="field__label">Fournisseur</span>
+        <input type="search" name="supplier" value="{{ filters.supplier }}" list="supplier-list" placeholder="Nom ou extrait">
+        <datalist id="supplier-list">
+          {% for supplier in suppliers %}<option value="{{ supplier }}"></option>{% endfor %}
+        </datalist>
+      </label>
+      <label class="field">
+        <span class="field__label">Statut de vérification</span>
+        <select name="status">
+          <option value="">Tous</option>
+          {% for key, label in verification_statuses.items() %}
+          <option value="{{ key }}" {% if key == filters.status %}selected{% endif %}>{{ label }}</option>
+          {% endfor %}
+        </select>
+      </label>
+      <div class="btn-row">
+        <button type="submit" class="btn btn--primary">Filtrer</button>
+        <a class="btn btn--ghost" href="/expenses">Réinitialiser</a>
+      </div>
+    </div>
+  </div>
+  <div class="card__footer">
+    <div class="kv-strip">
+      <span>Total HT : <strong>{{ summary.total_ht | mad }}</strong></span>
+      <span>TVA : <strong>{{ summary.total_vat | mad }}</strong></span>
+      <span>TTC : <strong>{{ summary.total_ttc | mad }}</strong></span>
+      <span>À vérifier : <strong>{{ summary.unverified_count }}</strong></span>
+      <span>Sans facteur d'émission : <strong>{{ summary.without_factor_count }}</strong> ({{ summary.without_factor_amount | mad }})</span>
+    </div>
+  </div>
+</form>
+
+{% if expenses %}
+<div class="card">
+  <div class="table-wrap">
+    <table class="data">
+      <thead>
+        <tr>
+          <th>Date</th><th>Catégorie</th><th>Fournisseur / description</th>
+          <th class="num">HT</th><th class="num">TTC</th><th>Activité</th><th>Carbone</th><th>Statut</th><th>Actions</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for expense in expenses %}
+        <tr>
+          <td class="nowrap">{{ expense.expense_date | datefr }}</td>
+          <td>{{ expense_categories.get(expense.category, expense.category) }}</td>
+          <td>
+            <div>{{ expense.supplier or "—" }} {{ ui.demo_badge(expense.is_demo) }}</div>
+            {% if expense.description %}<div class="muted small">{{ expense.description }}</div>{% endif %}
+          </td>
+          <td class="num">{{ expense.amount_ht | mad }}</td>
+          <td class="num">{{ expense.amount_ttc | mad }}</td>
+          <td>
+            {% if expense.quantity is not none %}
+              {{ expense.quantity | qty(expense.unit) }}
+            {% else %}<span class="muted">—</span>{% endif %}
+          </td>
+          <td>
+            {% set kg = expense.carbon_records | sum(attribute='kgco2e') %}
+            {% if expense.carbon_records %}
+              {{ kg | kg }}
+              <div class="muted small">{{ expense.emission_factor.code if expense.emission_factor else "" }}</div>
+            {% else %}
+              <span class="badge badge--warning">Non estimé</span>
+              {% if expense.carbon_source_note %}<div class="muted small">{{ expense.carbon_source_note }}</div>{% endif %}
+            {% endif %}
+          </td>
+          <td>{{ ui.badge(expense.verification_status, verification_statuses.get(expense.verification_status, expense.verification_status)) }}</td>
+          <td>
+            <div class="table-actions">
+              <a class="btn btn--small" href="/expenses/{{ expense.id }}/edit">Modifier</a>
+              {% if expense.verification_status != "verifiee" %}
+              <form method="post" action="/expenses/{{ expense.id }}/verify">
+                <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+                <input type="hidden" name="status" value="verifiee">
+                <button type="submit" class="btn btn--small btn--secondary">Vérifier</button>
+              </form>
+              {% endif %}
+              {% if expense.verification_status != "rejetee" %}
+              <form method="post" action="/expenses/{{ expense.id }}/verify">
+                <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+                <input type="hidden" name="status" value="rejetee">
+                <button type="submit" class="btn btn--small">Rejeter</button>
+              </form>
+              {% endif %}
+              <form method="post" action="/expenses/{{ expense.id }}/delete" data-confirm="Supprimer définitivement cette dépense et son estimation carbone liée ?">
+                <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+                <button type="submit" class="btn btn--small btn--danger">Supprimer</button>
+              </form>
+            </div>
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {{ ui.pagination(page, total_pages, "/expenses?period=" ~ (period_choice | urlencode) ~ "&category=" ~ (filters.category | urlencode) ~ "&supplier=" ~ (filters.supplier | urlencode) ~ "&status=" ~ (filters.status | urlencode) ~ "&") }}
+</div>
+{% else %}
+  {{ ui.empty_state(
+      "Aucune dépense sur cette période",
+      "Ajustez les filtres, saisissez une dépense manuellement ou importez un fichier CSV / Excel (assistant en quatre étapes avec détection des doublons).",
+      "/expenses/new",
+      "Saisir une dépense"
+  ) }}
+{% endif %}
+{% endblock %}

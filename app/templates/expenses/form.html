@@ -1,0 +1,153 @@
+{% extends "base.html" %}
+{% import "macros/ui.html" as ui %}
+{% block title %}{{ "Modifier une dépense" if expense else "Nouvelle dépense" }} — {{ app_name }}{% endblock %}
+{% block page_title %}{{ "Modifier la dépense" if expense else "Nouvelle dépense" }}{% endblock %}
+{% block page_subtitle %}<span class="muted small">Montants en dirhams (DH). Le carbone n'est estimé que si quantité, unité et facteur documenté sont fournis.</span>{% endblock %}
+
+{% block content %}
+{% set f = form or {} %}
+{% set v_date = f.get('expense_date') or (expense.expense_date.isoformat() if expense else (today | datefr)) %}
+{% set v_category = f.get('category') or (expense.category if expense else 'energie') %}
+{% set v_supplier = f.get('supplier') if f.get('supplier') is not none else (expense.supplier if expense else '') %}
+{% set v_description = f.get('description') if f.get('description') is not none else (expense.description if expense else '') %}
+{% set v_ht = f.get('amount_ht') if f.get('amount_ht') is not none else (expense.amount_ht | string if expense else '') %}
+{% set v_vat = f.get('vat_amount') if f.get('vat_amount') is not none else (expense.vat_amount | string if expense else '') %}
+{% set v_ttc = f.get('amount_ttc') if f.get('amount_ttc') is not none else (expense.amount_ttc | string if expense else '') %}
+{% set v_quantity = f.get('quantity') if f.get('quantity') is not none else (expense.quantity | string if expense and expense.quantity is not none else '') %}
+{% set v_unit = f.get('unit') or (expense.unit if expense else '') %}
+{% set v_factor = f.get('emission_factor_id') or (expense.emission_factor_id if expense else '') %}
+{% set v_status = f.get('verification_status') or (expense.verification_status if expense else 'a_verifier') %}
+{% set v_note = f.get('carbon_source_note') if f.get('carbon_source_note') is not none else (expense.carbon_source_note if expense else '') %}
+
+<form method="post" action="{{ '/expenses/' ~ expense.id if expense else '/expenses' }}" id="expense-form" class="js-carbon-form">
+  <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+
+  <div class="card">
+    <div class="card__header"><span class="card__title">Dépense</span></div>
+    <div class="card__body">
+      <div class="form-grid">
+        <label class="field">
+          <span class="field__label">Date de la dépense <span class="req">*</span></span>
+          <input type="date" name="expense_date" value="{{ v_date }}" required>
+          <span class="field__help">Formats acceptés : JJ/MM/AAAA ou AAAA-MM-JJ.</span>
+        </label>
+        <label class="field">
+          <span class="field__label">Catégorie <span class="req">*</span></span>
+          <select name="category" required>
+            {% for key, label in expense_categories.items() %}
+            <option value="{{ key }}" {% if key == v_category %}selected{% endif %}>{{ label }}</option>
+            {% endfor %}
+          </select>
+        </label>
+        <label class="field">
+          <span class="field__label">Fournisseur</span>
+          <input type="text" name="supplier" value="{{ v_supplier }}" placeholder="Ex. Sté Énergie Atlas">
+        </label>
+        <label class="field">
+          <span class="field__label">Statut de vérification</span>
+          <select name="verification_status">
+            {% for key, label in verification_statuses.items() %}
+            <option value="{{ key }}" {% if key == v_status %}selected{% endif %}>{{ label }}</option>
+            {% endfor %}
+          </select>
+        </label>
+        <label class="field span-2">
+          <span class="field__label">Description</span>
+          <textarea name="description" rows="2" placeholder="Objet de la dépense, référence de facture…">{{ v_description }}</textarea>
+        </label>
+        <label class="field">
+          <span class="field__label">Montant HT</span>
+          <input type="text" name="amount_ht" value="{{ v_ht }}" placeholder="Ex. 12 345,67" inputmode="decimal">
+        </label>
+        <label class="field">
+          <span class="field__label">TVA</span>
+          <input type="text" name="vat_amount" value="{{ v_vat }}" placeholder="Ex. 2 469,13" inputmode="decimal">
+        </label>
+        <label class="field">
+          <span class="field__label">Montant TTC</span>
+          <input type="text" name="amount_ttc" value="{{ v_ttc }}" placeholder="Calculé si laissé vide" inputmode="decimal">
+        </label>
+      </div>
+      <p class="muted small mt-1">
+        Saisissez au moins un montant HT ou TTC. Si le HT est absent, il est déduit du TTC et de la TVA
+        {{ "— l'import applique la même règle avec un avertissement." if not expense else "." }}
+      </p>
+    </div>
+  </div>
+
+  <div class="card">
+    <div class="card__header">
+      <span class="card__title">Estimation carbone (facultative)</span>
+      <span class="card__subtitle">Formule : quantité d'activité × facteur d'émission</span>
+    </div>
+    <div class="card__body">
+      <div class="form-grid form-grid--4">
+        <label class="field">
+          <span class="field__label">Quantité d'activité</span>
+          <input type="text" name="quantity" value="{{ v_quantity }}" placeholder="Ex. 1500" inputmode="decimal">
+        </label>
+        <label class="field">
+          <span class="field__label">Unité</span>
+          <select name="unit">
+            <option value="">— Non renseignée —</option>
+            {% for key, label in units.items() %}
+            <option value="{{ key }}" {% if key == v_unit %}selected{% endif %}>{{ key }} — {{ label }}</option>
+            {% endfor %}
+          </select>
+        </label>
+        <label class="field span-2">
+          <span class="field__label">Facteur d'émission documenté</span>
+          <select name="emission_factor_id" id="factor-select">
+            <option value="">— Aucun facteur (carbone non estimé) —</option>
+            {% for factor in factors %}
+            <option value="{{ factor.id }}"
+                    data-unit="{{ factor.unit }}"
+                    data-value="{{ factor.kgco2e_per_unit }}"
+                    data-code="{{ factor.code }}"
+                    data-label="{{ factor.label }}"
+                    data-source="{{ factor.source_name }}"
+                    data-scope="{{ scopes.get(factor.scope, factor.scope) }}"
+                    data-method="{{ emission_methods.get(factor.method, factor.method) }}"
+                    data-confidence="{{ confidence_levels.get(factor.confidence, factor.confidence) }}"
+                    data-valid-from="{{ factor.valid_from | datefr if factor.valid_from else '' }}"
+                    data-valid-until="{{ factor.valid_until | datefr if factor.valid_until else '' }}"
+                    data-note="{{ factor.calculation_note }}"
+                    {% if v_factor and factor.id | string == v_factor | string %}selected{% endif %}>
+              {{ factor.code }} — {{ factor.label }} ({{ factor.kgco2e_per_unit }} kgCO₂e/{{ factor.unit }}) — {{ factor.source_name }}
+            </option>
+            {% endfor %}
+          </select>
+          <span class="field__help">Le catalogue indique la source, le périmètre et la validité. Aucun facteur n'est attribué automatiquement.</span>
+        </label>
+      </div>
+
+      <div id="factor-hint" class="info-note mt-1" hidden></div>
+
+      <div class="btn-row mt-1">
+        <button type="button" class="btn btn--secondary" id="carbon-preview-button">Calculer l'aperçu carbone</button>
+        <span class="muted small">Aucun enregistrement n'est créé par l'aperçu.</span>
+      </div>
+      <div id="carbon-preview" class="mt-1" hidden></div>
+
+      <label class="field mt-1">
+        <span class="field__label">Source / précision carbone (conservée avec la dépense)</span>
+        <textarea name="carbon_source_note" rows="2" placeholder="Ex. facture n° 2026-045, compteur relevé le 30/09…">{{ v_note }}</textarea>
+      </label>
+    </div>
+  </div>
+
+  <div class="btn-row">
+    <button type="submit" class="btn btn--primary">{{ "Enregistrer les modifications" if expense else "Enregistrer la dépense" }}</button>
+    <a class="btn" href="/expenses">Annuler</a>
+    {% if expense %}
+    <span class="grow"></span>
+    <button type="submit" class="btn btn--danger" formaction="/expenses/{{ expense.id }}/delete"
+            data-confirm-click="Supprimer définitivement cette dépense et son estimation carbone liée ?">Supprimer</button>
+    {% endif %}
+  </div>
+</form>
+{% endblock %}
+
+{% block scripts %}
+<script src="/static/js/carbon.js" defer></script>
+{% endblock %}

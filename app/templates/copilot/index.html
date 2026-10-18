@@ -1,0 +1,135 @@
+{% extends "base.html" %}
+{% import "macros/ui.html" as ui %}
+{% block title %}Assistant IA — {{ app_name }}{% endblock %}
+{% block page_title %}Assistant CarbonLedger Copilot{% endblock %}
+{% block page_subtitle %}
+<span class="muted small">
+  Posez vos questions sur vos dépenses, vos émissions et vos comparaisons de décisions :
+  les chiffres cités proviennent du moteur de calcul de l'application, jamais du modèle.
+</span>
+{% endblock %}
+
+{% block content %}
+<div id="copilot-page">
+
+  <div class="grid grid--sidebar">
+    <div>
+      <div class="card">
+        <div class="card__header">
+          <span class="card__title">Conversation</span>
+          <span class="card__subtitle">
+            {% if ai_configured %}
+              Mode IA activé (modèle {{ ai_model }}) — contexte calculé par l'application
+            {% else %}
+              Mode démonstration : règles déterministes, aucune IA externe
+            {% endif %}
+          </span>
+        </div>
+        <div class="card__body">
+          <div class="chat">
+            <div class="chat__messages" id="chat-messages" aria-live="polite">
+              <div class="msg msg--assistant">
+                <div class="msg__meta">CarbonLedger Copilot</div>
+                <div class="msg__body">
+                  <p>Bonjour. J'analyse uniquement les données enregistrées dans votre espace :</p>
+                  <ul class="copilot-list">
+                    <li>{{ counts.expenses }} dépense(s) enregistrée(s)</li>
+                    <li>{{ counts.carbon_records }} enregistrement(s) carbone</li>
+                    <li>{{ counts.projects }} projet(s) de décision</li>
+                  </ul>
+                  <p>Choisissez une question ci-dessous ou écrivez la vôtre.</p>
+                </div>
+              </div>
+            </div>
+
+            <form id="copilot-form" class="chat__form">
+              <label class="field" style="flex: 1 1 auto;">
+                <span class="field__label">Votre question</span>
+                <textarea id="copilot-question" rows="2" placeholder="Ex. : quelle option coûte le moins cher sur 5 ans ?"></textarea>
+              </label>
+              <button type="submit" class="btn btn--primary" id="copilot-send">Envoyer</button>
+            </form>
+
+            <div class="chips">
+              {% for question in suggested_questions %}
+              <button type="button" class="chip" data-question="{{ question }}">{{ question }}</button>
+              {% endfor %}
+            </div>
+          </div>
+        </div>
+        <div class="card__footer">
+          <p class="disclaimers">
+            L'assistant ne réalise aucun calcul financier ou carbone : les montants, tonnes de CO₂e et coûts par tonne
+            évitée proviennent des calculs déterministes de l'application. Ses réponses sont des pistes d'analyse,
+            pas des recommandations professionnelles engageantes.
+          </p>
+        </div>
+      </div>
+    </div>
+
+    <div>
+      <div class="card">
+        <div class="card__header">
+          <span class="card__title">État de l'assistant</span>
+          {% if ai_configured %}
+            {{ ui.badge('success', 'IA configurée') }}
+          {% else %}
+            {{ ui.badge('muted', 'Mode démonstration') }}
+          {% endif %}
+        </div>
+        <div class="card__body">
+          {% if ai_configured %}
+          <p class="muted small">
+            Un modèle externe est interrogé avec un instantané JSON calculé par l'application. Le modèle reçoit
+            l'interdiction d'inventer des chiffres ou des sources ; en cas d'échec, la réponse bascule
+            automatiquement en mode démonstration.
+          </p>
+          <p class="small">Modèle : <strong>{{ ai_model }}</strong></p>
+          {% else %}
+          <p class="muted small">
+            Aucune clé API n'est configurée : les réponses sont produites par des règles déterministes à partir des
+            données enregistrées. Pour activer le mode IA, renseignez <code>CARBONLEDGER_AI_API_KEY</code> dans le
+            fichier <code>.env</code> puis redémarrez l'application.
+          </p>
+          {% endif %}
+          <div class="btn-row">
+            <a class="btn btn--small" href="/settings?tab=ia">Configurer l'assistant</a>
+            <a class="btn btn--small" href="/settings?tab=facteurs">Vérifier les facteurs d'émission</a>
+          </div>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="card__header"><span class="card__title">Données analysées</span></div>
+        <div class="card__body">
+          <div class="kv-strip">
+            <span>Dépenses : <strong>{{ counts.expenses }}</strong></span>
+            <span>Registre carbone : <strong>{{ counts.carbon_records }}</strong></span>
+            <span>Projets de décision : <strong>{{ counts.projects }}</strong></span>
+          </div>
+          <p class="muted small mt-1">
+            Périmètre : 12 derniers mois pour les dépenses et le registre carbone, projets les plus récents pour les
+            comparaisons. Les données de démonstration sont signalées par un badge « Démo ».
+          </p>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="card__header"><span class="card__title">Ce que l'assistant ne fera jamais</span></div>
+        <div class="card__body">
+          <ul class="list-check">
+            <li><span>Inventer un montant, un fournisseur ou un facteur d'émission</span></li>
+            <li><span>Attribuer un facteur d'émission à votre place</span></li>
+            <li><span>Présenter une baisse d'émissions comme une économie financière automatique</span></li>
+            <li><span>Remplacer un avis comptable, fiscal ou réglementaire</span></li>
+          </ul>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script src="/static/js/copilot.js" defer></script>
+{% endblock %}

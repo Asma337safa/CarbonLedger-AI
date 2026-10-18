@@ -1,0 +1,23 @@
+{% extends "base.html" %}
+{% block title %}Erreur interne — {{ app_name }}{% endblock %}
+
+{% block content %}
+<div class="empty">
+  <div class="empty__icon" aria-hidden="true">⚠</div>
+  <h2 class="empty__title">Erreur interne</h2>
+  <p class="empty__message">
+    {{ message | default("Une erreur interne est survenue. Vos données n'ont pas été modifiées.") }}
+  </p>
+  {% if detail is defined and detail %}
+  <p class="muted small">Référence technique : {{ detail }}</p>
+  {% endif %}
+  <p class="muted small">
+    Réessayez l'action. Si le problème persiste, consultez le journal d'activité
+    (Paramètres → Journal d'activité) et transmettez la référence ci-dessus à votre administrateur.
+  </p>
+  <div class="btn-row">
+    <a class="btn btn--primary" href="/">Retour au tableau de bord</a>
+    <a class="btn" href="/settings?tab=audit">Journal d'activité</a>
+  </div>
+</div>
+{% endblock %}

@@ -1,0 +1,92 @@
+{# Macros d'interface partagées par toutes les pages. #}
+
+{% macro badge(value, label=None) -%}
+<span class="badge {{ value | badgeclass }}">{{ label if label else value }}</span>
+{%- endmacro %}
+
+{% macro demo_badge(is_demo) -%}
+{% if is_demo %}<span class="badge badge--demo" title="Donnée fictive de démonstration, à supprimer avant tout usage réel">Démo</span>{% endif %}
+{%- endmacro %}
+
+{% macro kpi(label, value, sub=None, tone='', extra_class='') -%}
+<div class="kpi {{ tone }} {{ extra_class }}">
+  <div class="kpi__label">{{ label }}</div>
+  <div class="kpi__value">{{ value }}</div>
+  {% if sub %}<div class="kpi__sub">{{ sub }}</div>{% endif %}
+</div>
+{%- endmacro %}
+
+{% macro field(name, label, value='', type='text', required=False, help='', placeholder='', step=None, min=None, max=None, extra_class='', attrs='') -%}
+<label class="field {{ extra_class }}">
+  <span class="field__label">{{ label }}{% if required %} <span class="req" aria-hidden="true">*</span>{% endif %}</span>
+  <input type="{{ type }}" name="{{ name }}" value="{{ value if value is not none else '' }}"
+         {% if placeholder %}placeholder="{{ placeholder }}"{% endif %}
+         {% if required %}required{% endif %}
+         {% if step is not none %}step="{{ step }}"{% endif %}
+         {% if min is not none %}min="{{ min }}"{% endif %}
+         {% if max is not none %}max="{{ max }}"{% endif %} {{ attrs | safe }}>
+  {% if help %}<span class="field__help">{{ help }}</span>{% endif %}
+</label>
+{%- endmacro %}
+
+{% macro select_field(name, label, value, options, required=False, help='', extra_class='', attrs='') -%}
+<label class="field {{ extra_class }}">
+  <span class="field__label">{{ label }}{% if required %} <span class="req" aria-hidden="true">*</span>{% endif %}</span>
+  <select name="{{ name }}" {{ attrs | safe }}>
+    {% if not required %}<option value="">— Non renseigné —</option>{% endif %}
+    {% for option_value, option_label in options.items() %}
+    <option value="{{ option_value }}" {% if option_value | string == (value | string) %}selected{% endif %}>{{ option_label }}</option>
+    {% endfor %}
+  </select>
+  {% if help %}<span class="field__help">{{ help }}</span>{% endif %}
+</label>
+{%- endmacro %}
+
+{% macro textarea_field(name, label, value='', rows=3, help='', placeholder='', extra_class='') -%}
+<label class="field {{ extra_class }}">
+  <span class="field__label">{{ label }}</span>
+  <textarea name="{{ name }}" rows="{{ rows }}" {% if placeholder %}placeholder="{{ placeholder }}"{% endif %}>{{ value if value is not none else '' }}</textarea>
+  {% if help %}<span class="field__help">{{ help }}</span>{% endif %}
+</label>
+{%- endmacro %}
+
+{% macro empty_state(title, message, href=None, cta=None) -%}
+<div class="empty">
+  <div class="empty__icon" aria-hidden="true">◍</div>
+  <h3 class="empty__title">{{ title }}</h3>
+  <p class="empty__message">{{ message }}</p>
+  {% if href and cta %}<a class="btn btn--primary" href="{{ href }}">{{ cta }}</a>{% endif %}
+</div>
+{%- endmacro %}
+
+{% macro pagination(page, total_pages, base) -%}
+{% if total_pages > 1 %}
+<nav class="pagination" aria-label="Pagination">
+  {% if page > 1 %}<a class="pagination__link" href="{{ base }}page={{ page - 1 }}">← Précédent</a>{% endif %}
+  <span class="pagination__info">Page {{ page }} / {{ total_pages }}</span>
+  {% if page < total_pages %}<a class="pagination__link" href="{{ base }}page={{ page + 1 }}">Suivant →</a>{% endif %}
+</nav>
+{% endif %}
+{%- endmacro %}
+
+{% macro notice(level, title, message) -%}
+<div class="notice notice--{{ level }}">
+  <strong class="notice__title">{{ title }}</strong>
+  <span class="notice__message">{{ message }}</span>
+</div>
+{%- endmacro %}
+
+{% macro chart_block(svg, caption='', extra_id='') -%}
+{% if svg %}
+<figure class="chart-block" {% if extra_id %}id="{{ extra_id }}"{% endif %}>
+  {{ svg | safe }}
+  {% if caption %}<figcaption class="chart-block__caption">{{ caption }}</figcaption>{% endif %}
+</figure>
+{% else %}
+<p class="muted">Graphique indisponible : données insuffisantes.</p>
+{% endif %}
+{%- endmacro %}
+
+{% macro info_note(text) -%}
+<p class="info-note"><span class="info-note__icon" aria-hidden="true">ⓘ</span> {{ text }}</p>
+{%- endmacro %}

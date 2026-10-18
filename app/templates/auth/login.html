@@ -1,0 +1,34 @@
+{% extends "base.html" %}
+{% block title %}Connexion — {{ app_name }}{% endblock %}
+
+{% block content %}
+<h1>Connexion</h1>
+<p class="muted">Accédez au pilotage de vos coûts et de vos émissions.</p>
+
+{% if error %}<div class="flash flash--danger" role="alert"><span class="flash__text">{{ error }}</span></div>{% endif %}
+
+<form method="post" action="/login" class="mt-2">
+  <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+  <input type="hidden" name="next" value="{{ next_url }}">
+  <div class="form-grid" style="grid-template-columns: 1fr;">
+    <label class="field">
+      <span class="field__label">Adresse e-mail</span>
+      <input type="email" name="email" value="{{ email }}" autocomplete="username" required autofocus>
+    </label>
+    <label class="field">
+      <span class="field__label">Mot de passe</span>
+      <input type="password" name="password" autocomplete="current-password" required>
+    </label>
+  </div>
+  <div class="btn-row mt-2">
+    <button type="submit" class="btn btn--primary btn--block">Se connecter</button>
+  </div>
+</form>
+
+<p class="mt-2 muted small">
+  Pas encore de compte ? <a href="/register">Créer un compte entreprise</a>.
+</p>
+<p class="muted small">
+  Sécurité : après plusieurs tentatives échouées, le compte est temporairement verrouillé.
+</p>
+{% endblock %}

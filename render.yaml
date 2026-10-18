@@ -1,0 +1,43 @@
+# CarbonLedger AI — hébergement gratuit : service web Render + PostgreSQL Neon.
+#
+# Marche à suivre (détaillée dans DEPLOYMENT.md, section 4) :
+#   1. Créer un projet Neon (https://neon.com) en région Frankfurt, puis copier
+#      sa chaîne de connexion (`postgresql://…?sslmode=require`) : l'application
+#      l'accepte telle quelle.
+#   2. Sur Render (https://render.com) : « New + » → « Blueprint » → choisir ce
+#      dépôt. Render lit ce fichier et crée le service web.
+#   3. Variables demandées au moment de la création :
+#        - CARBONLEDGER_DATABASE_URL : la chaîne Neon (étape 1) ;
+#        - CARBONLEDGER_BASE_URL     : https://<nom-du-service>.onrender.com
+#          (valeur préremplie pour « carbonledger-ai », à ajuster sinon).
+#      CARBONLEDGER_SECRET_KEY est générée automatiquement par Render.
+#   4. Au premier démarrage, l'application crée le schéma (idempotent).
+#      Ensuite : créer un compte dans l'application puis, si souhaité,
+#      Paramètres → Données → « Charger les données de démonstration ».
+#
+# Limites du plan gratuit Render : mise en veille après 15 min sans trafic
+# (première requête ~30-60 s), 750 h d'instance/mois, disque éphémère — la
+# base de données vit chez Neon, donc rien d'important n'est perdu.
+
+services:
+  - type: web
+    name: carbonledger-ai
+    runtime: python
+    plan: free
+    region: frankfurt
+    branch: main
+    buildCommand: pip install -r requirements.txt
+    startCommand: uvicorn app.main:app --host 0.0.0.0 --port $PORT --proxy-headers
+    healthCheckPath: /health
+    autoDeployTrigger: commit
+    envVars:
+      - key: CARBONLEDGER_ENV
+        value: production
+      - key: CARBONLEDGER_SECRET_KEY
+        generateValue: true
+      - key: CARBONLEDGER_COOKIE_SECURE
+        value: "true"
+      - key: CARBONLEDGER_BASE_URL
+        value: https://carbonledger-ai.onrender.com
+      - key: CARBONLEDGER_DATABASE_URL
+        sync: false

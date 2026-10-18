@@ -1,0 +1,57 @@
+{% extends "base.html" %}
+{% block title %}Créer un compte — {{ app_name }}{% endblock %}
+
+{% block content %}
+<h1>Créer votre compte entreprise</h1>
+<p class="muted">Un compte = une organisation. Vos données restent isolées des autres entreprises.</p>
+
+{% if error %}<div class="flash flash--danger" role="alert"><span class="flash__text">{{ error }}</span></div>{% endif %}
+
+<form method="post" action="/register">
+  <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+  <div class="form-grid">
+    <label class="field">
+      <span class="field__label">Votre nom <span class="req">*</span></span>
+      <input type="text" name="full_name" value="{{ form.full_name or '' }}" autocomplete="name" required>
+    </label>
+    <label class="field">
+      <span class="field__label">Nom de l'entreprise <span class="req">*</span></span>
+      <input type="text" name="company_name" value="{{ form.company_name or '' }}" required>
+    </label>
+    <label class="field">
+      <span class="field__label">ICE (Maroc)</span>
+      <input type="text" name="ice" value="{{ form.ice or '' }}" placeholder="Identifiant Commun de l'Entreprise">
+    </label>
+    <label class="field">
+      <span class="field__label">Secteur d'activité</span>
+      <input type="text" name="sector" value="{{ form.sector or '' }}" placeholder="Ex. agroalimentaire, textile, logistique…">
+    </label>
+    <label class="field">
+      <span class="field__label">Taille de l'entreprise</span>
+      <input type="text" name="company_size" value="{{ form.company_size or '' }}" placeholder="Ex. 10-50 salariés">
+    </label>
+    <label class="field">
+      <span class="field__label">Adresse e-mail <span class="req">*</span></span>
+      <input type="email" name="email" value="{{ form.email or '' }}" autocomplete="username" required>
+    </label>
+    <label class="field">
+      <span class="field__label">Mot de passe <span class="req">*</span></span>
+      <input type="password" name="password" autocomplete="new-password" required>
+      <span class="field__help">10 caractères minimum, avec majuscule, minuscule et chiffre ; différents de votre e-mail.</span>
+    </label>
+    <label class="field">
+      <span class="field__label">Confirmer le mot de passe <span class="req">*</span></span>
+      <input type="password" name="password_confirm" autocomplete="new-password" required>
+    </label>
+  </div>
+  <div class="btn-row mt-2">
+    <button type="submit" class="btn btn--primary">Créer mon compte</button>
+    <a class="btn" href="/login">J'ai déjà un compte</a>
+  </div>
+</form>
+
+<p class="muted small mt-2">
+  Après la création, vous pourrez charger un jeu de données de démonstration clairement identifié
+  ou saisir vos premières dépenses.
+</p>
+{% endblock %}

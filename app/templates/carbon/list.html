@@ -1,0 +1,141 @@
+{% extends "base.html" %}
+{% import "macros/ui.html" as ui %}
+{% block title %}Comptabilité carbone — {{ app_name }}{% endblock %}
+{% block page_title %}Comptabilité carbone{% endblock %}
+{% block page_subtitle %}<span class="muted small">{{ total_count }} enregistrement(s) — {{ period_label }}</span>{% endblock %}
+
+{% block content %}
+<div class="btn-row mb-2">
+  <a class="btn btn--primary" href="/carbon/new">Saisir une donnée carbone</a>
+  <a class="btn" href="/carbon/export.csv?period={{ period_choice | urlencode }}">Exporter le registre (CSV)</a>
+</div>
+
+<div class="grid grid--4 mb-2">
+  {{ ui.kpi("Émissions totales", summary.total_t | tco2e, summary.record_count ~ " enregistrement(s)", "info") }}
+  {{ ui.kpi("Mesuré", (summary.measured_kg / 1000) | tco2e, summary.measured_count ~ " ligne(s) issues de mesures directes", "good") }}
+  {{ ui.kpi("Calculé (facteur documenté)", (summary.calculated_kg / 1000) | tco2e, "Quantité × facteur sourcé", "good") }}
+  {{ ui.kpi("Estimé", (summary.estimated_kg / 1000) | tco2e,
+      (summary.estimated_share_pct | pct) ~ " du total — dont monétaire " ~ ((summary.monetary_kg / 1000) | tco2e),
+      "warn" if summary.estimated_kg > 0 else "good") }}
+</div>
+
+<form class="card" method="get" action="/carbon">
+  <div class="card__body">
+    <div class="filters">
+      <label class="field">
+        <span class="field__label">Période</span>
+        <select name="period">
+          {% for key, label in period_presets.items() %}
+          <option value="{{ key }}" {% if key == period_choice %}selected{% endif %}>{{ label }}</option>
+          {% endfor %}
+        </select>
+      </label>
+      <label class="field">
+        <span class="field__label">Poste carbone</span>
+        <select name="category">
+          <option value="">Tous</option>
+          {% for key, label in carbon_categories.items() %}
+          <option value="{{ key }}" {% if key == filters.category %}selected{% endif %}>{{ label }}</option>
+          {% endfor %}
+        </select>
+      </label>
+      <label class="field">
+        <span class="field__label">Statut de la donnée</span>
+        <select name="status">
+          <option value="">Tous</option>
+          {% for key, label in carbon_statuses.items() %}
+          <option value="{{ key }}" {% if key == filters.status %}selected{% endif %}>{{ label }}</option>
+          {% endfor %}
+        </select>
+      </label>
+      <label class="field">
+        <span class="field__label">Méthode</span>
+        <select name="method">
+          <option value="">Toutes</option>
+          {% for key, label in emission_methods.items() %}
+          <option value="{{ key }}" {% if key == filters.method %}selected{% endif %}>{{ label }}</option>
+          {% endfor %}
+        </select>
+      </label>
+      <div class="btn-row">
+        <button type="submit" class="btn btn--primary">Filtrer</button>
+        <a class="btn btn--ghost" href="/carbon">Réinitialiser</a>
+      </div>
+    </div>
+  </div>
+</form>
+
+{% if category_chart %}
+<div class="card">
+  <div class="card__header"><span class="card__title">Répartition des émissions par poste</span></div>
+  <div class="card__body">{{ ui.chart_block(category_chart) }}</div>
+</div>
+{% endif %}
+
+{% if records %}
+<div class="card">
+  <div class="table-wrap">
+    <table class="data">
+      <thead>
+        <tr>
+          <th>Période</th><th>Poste</th><th class="num">Activité</th><th>Facteur d'émission</th>
+          <th>Méthode</th><th>Statut</th><th class="num">Émissions</th><th>Origine</th><th></th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for record in records %}
+        <tr>
+          <td class="nowrap">{{ record.period_start | datefr }}{% if record.period_end != record.period_start %}<div class="muted small">→ {{ record.period_end | datefr }}</div>{% endif %}</td>
+          <td>{{ carbon_categories.get(record.category, record.category) }} {{ ui.demo_badge(record.is_demo) }}</td>
+          <td class="num">{{ record.activity_quantity | qty(record.activity_unit) }}</td>
+          <td>
+            {% if record.emission_factor %}
+              <div>{{ record.emission_factor.code }} — {{ record.emission_factor.kgco2e_per_unit }} kgCO₂e/{{ record.emission_factor.unit }}</div>
+              <div class="muted small">{{ record.emission_factor.source_name }}{% if record.emission_factor.source_version %} ({{ record.emission_factor.source_version }}){% endif %}</div>
+            {% else %}<span class="muted">Facteur supprimé</span>{% endif %}
+          </td>
+          <td>{{ ui.badge(record.method, emission_methods.get(record.method, record.method)) }}</td>
+          <td>{{ ui.badge(record.status, carbon_statuses.get(record.status, record.status)) }}
+            <div class="muted small">confiance {{ confidence_levels.get(record.confidence, record.confidence) }}</div>
+          </td>
+          <td class="num">
+            {{ record.kgco2e | kg }}
+            <div class="muted small">{{ (record.kgco2e / 1000) | tco2e }}</div>
+          </td>
+          <td class="muted small">
+            {% if record.expense_id %}Dépense liée
+            {% elif record.option_id %}Option de décision
+            {% else %}Saisie manuelle{% endif %}
+          </td>
+          <td>
+            {% if record.expense_id %}
+            <a class="btn btn--small" href="/expenses/{{ record.expense_id }}/edit">Dépense</a>
+            {% else %}
+            <form method="post" action="/carbon/{{ record.id }}/delete" data-confirm="Supprimer cet enregistrement carbone ? Les rapports déjà générés ne sont pas modifiés.">
+              <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+              <button type="submit" class="btn btn--small btn--danger">Supprimer</button>
+            </form>
+            {% endif %}
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {{ ui.pagination(page, total_pages, "/carbon?period=" ~ (period_choice | urlencode) ~ "&category=" ~ (filters.category | urlencode) ~ "&status=" ~ (filters.status | urlencode) ~ "&method=" ~ (filters.method | urlencode) ~ "&") }}
+</div>
+{% else %}
+  {{ ui.empty_state(
+      "Aucun enregistrement carbone sur cette période",
+      "Deux chemins possibles : lier une quantité, une unité et un facteur documenté à vos dépenses, ou saisir directement une ligne du registre (énergie, transport, déchets…).",
+      "/carbon/new",
+      "Saisir une donnée carbone"
+  ) }}
+{% endif %}
+
+<p class="muted small">
+  Rappel de méthode : émissions (kg CO₂e) = quantité d'activité × facteur d'émission documenté.
+  Le statut « Estimé » signale une donnée approximative ; les estimations monétaires sont explicitement séparées.
+  Aucun facteur n'est attribué automatiquement.
+</p>
+{% endblock %}

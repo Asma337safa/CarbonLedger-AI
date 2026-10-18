@@ -1,0 +1,315 @@
+{% extends "base.html" %}
+{% import "macros/ui.html" as ui %}
+{% from "decisions/_panels.html" import figures_row, options_table, pairs_table, charts_grid, missing_panel, arbitration_panel, sensitivity_panel, scenarios_panel %}
+{% block title %}{{ project.title }} — Comparateur — {{ app_name }}{% endblock %}
+{% block page_title %}{{ project.title }}{% endblock %}
+{% block page_subtitle %}
+<span class="muted small">
+  {{ expense_categories.get(project.category, project.category) }} ·
+  horizon {{ project.horizon_years }} ans ·
+  prix interne du carbone : {{ project.internal_carbon_price | mad(0) }}/t CO₂e ·
+  priorité : <span id="priority-label">{{ priorities.get(priority, priority) }}</span>
+</span>
+{% endblock %}
+
+{% set param_labels = {
+  'energy_price_delta_pct': "Prix de l'énergie",
+  'transport_delta_pct': "Coûts de transport",
+  'savings_delta_pct': "Économies attendues",
+  'activity_volume_delta_pct': "Volume d'activité",
+  'emission_factor_delta_pct': "Facteurs d'émission",
+  'lifetime_delta_years': "Durée d'utilisation"
+} %}
+
+{% block content %}
+<div id="decision-page" data-project-id="{{ project.id }}">
+
+  <div class="card">
+    <div class="card__header">
+      <div>
+        <div class="card__title">Statut et arbitrage
+          {{ ui.badge(project.status, project_statuses.get(project.status, project.status)) }}
+          {{ ui.demo_badge(project.is_demo) }}
+        </div>
+        <div class="card__subtitle">
+          Dernière mise à jour : {{ project.updated_at | datetimefr }}
+          {% set chosen_list = project.options | selectattr('id', 'equalto', project.chosen_option_id) | list %}
+          {% if chosen_list %} · option retenue : <strong>{{ chosen_list[0].name }}</strong>{% endif %}
+        </div>
+      </div>
+      <div class="btn-row">
+        <a class="btn btn--small" href="/decisions/{{ project.id }}/edit">Modifier les options</a>
+        <a class="btn btn--small" href="/decisions/{{ project.id }}/report.pdf">Rapport PDF</a>
+        <a class="btn btn--small" href="/decisions/{{ project.id }}/export.csv">Export CSV</a>
+        <form method="post" action="/decisions/{{ project.id }}/delete"
+              data-confirm="Supprimer ce projet, ses options, ses scénarios et son historique de recommandations ?">
+          <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+          <button type="submit" class="btn btn--small btn--danger">Supprimer</button>
+        </form>
+      </div>
+    </div>
+    <div class="card__body">
+      {% if project.description %}<p class="muted small">{{ project.description }}</p>{% endif %}
+      <form method="post" action="/decisions/{{ project.id }}/save">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+        <div class="form-grid form-grid--4">
+          <label class="field">
+            <span class="field__label">Priorité d'arbitrage</span>
+            <select id="priority-select" name="priority">
+              {% for key, label in priorities.items() %}
+              <option value="{{ key }}" {% if key == priority %}selected{% endif %}>{{ label }}</option>
+              {% endfor %}
+            </select>
+          </label>
+          <label class="field">
+            <span class="field__label">Statut de la décision</span>
+            <select name="status">
+              {% for key, label in project_statuses.items() %}
+              <option value="{{ key }}" {% if key == project.status %}selected{% endif %}>{{ label }}</option>
+              {% endfor %}
+            </select>
+          </label>
+          <label class="field">
+            <span class="field__label">Option retenue (facultatif)</span>
+            <select name="chosen_option">
+              <option value="">— Aucune pour le moment —</option>
+              {% for option in project.options %}
+              <option value="{{ option.name }}" {% if project.chosen_option_id == option.id %}selected{% endif %}>{{ option.name }}</option>
+              {% endfor %}
+            </select>
+          </label>
+          <label class="field">
+            <span class="field__label">Prix interne du carbone (DH/t)</span>
+            <input type="number" name="internal_carbon_price" min="0" step="1" value="{{ project.internal_carbon_price }}">
+          </label>
+        </div>
+        <div class="btn-row mt-1">
+          <button type="button" class="btn btn--small" id="priority-apply">Recalculer avec cette priorité</button>
+          <button type="submit" class="btn btn--small btn--primary">Enregistrer la décision</button>
+        </div>
+        <p class="muted small mt-1">
+          Le recalcul affiche l'effet d'une autre priorité sans rien modifier. L'enregistrement historise la
+          recommandation complète (hypothèses, classement, limites) et fige la version de référence.
+        </p>
+      </form>
+    </div>
+  </div>
+
+  {% if error %}
+  <div class="notice notice--danger"><strong class="notice__title">Calcul impossible</strong><span class="notice__message">{{ error }}</span></div>
+  {% endif %}
+
+  <div class="tabs">
+    <a class="tab {% if tab == 'resultats' %}tab--active{% endif %}" href="/decisions/{{ project.id }}?tab=resultats">Résultats</a>
+    <a class="tab {% if tab == 'arbitrage' %}tab--active{% endif %}" href="/decisions/{{ project.id }}?tab=arbitrage">Arbitrage</a>
+    <a class="tab {% if tab == 'scenarios' %}tab--active{% endif %}" href="/decisions/{{ project.id }}?tab=scenarios">Scénarios</a>
+    <a class="tab {% if tab == 'sensibilite' %}tab--active{% endif %}" href="/decisions/{{ project.id }}?tab=sensibilite">Sensibilité</a>
+  </div>
+
+  {% if tab == 'resultats' %}
+    {{ figures_row(figures, analysis.formula) }}
+
+    <div class="card">
+      <div class="card__header">
+        <span class="card__title">Données manquantes ou fragiles</span>
+        <span class="card__subtitle">Aucune valeur n'est inventée pour combler un champ vide</span>
+      </div>
+      <div class="card__body">
+        {{ missing_panel(analysis.missing_data) }}
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="card__header">
+        <span class="card__title">Résultats par option</span>
+        <span class="card__subtitle">Période commune de {{ analysis.horizon_years }} ans · montants en DH</span>
+      </div>
+      {{ options_table(analysis.comparison) }}
+      <div class="card__footer muted small">
+        Coût annuel net = fonctionnement + maintenance − économies. La mise de fonds initiale inclut le transport.
+        {% if project.discount_rate_pct %}Actualisation appliquée : {{ project.discount_rate_pct | pct }} par an.{% endif %}
+      </div>
+    </div>
+
+    {{ charts_grid(analysis.charts) }}
+
+    {% if analysis.comparison.pairs %}
+    <div class="card">
+      <div class="card__header">
+        <span class="card__title">Comparaisons deux à deux</span>
+        <span class="card__subtitle">Écart de coût, écart d'émissions, coût par tonne évitée</span>
+      </div>
+      <div class="card__body">
+        {{ pairs_table(analysis.comparison) }}
+      </div>
+    </div>
+    {% endif %}
+
+  {% elif tab == 'arbitrage' %}
+    {{ arbitration_panel(analysis.arbitration, analysis.comparison) }}
+
+    <div class="card">
+      <div class="card__header">
+        <span class="card__title">Historique des recommandations enregistrées</span>
+        <span class="card__subtitle">{{ project.recommendations | length }} version(s)</span>
+      </div>
+      {% if project.recommendations %}
+      <div class="table-wrap">
+        <table class="data">
+          <thead>
+            <tr><th>Date</th><th>Priorité</th><th class="num">Prix carbone</th><th>Recommandation</th></tr>
+          </thead>
+          <tbody>
+            {% for recommendation in project.recommendations | reverse %}
+            <tr>
+              <td class="nowrap">{{ recommendation.created_at | datetimefr }}</td>
+              <td>{{ priorities.get(recommendation.priority, recommendation.priority) }}</td>
+              <td class="num">{{ recommendation.carbon_price | mad(0) }}</td>
+              <td>{{ recommendation.summary }}</td>
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+      {% else %}
+      <div class="card__body">
+        <p class="muted">
+          Aucune recommandation n'a encore été enregistrée. Cliquez sur « Enregistrer la décision » pour
+          historiser les hypothèses et le classement retenus à cette date.
+        </p>
+      </div>
+      {% endif %}
+    </div>
+
+  {% elif tab == 'scenarios' %}
+    {{ scenarios_panel(analysis) }}
+
+    <form id="scenario-form" method="post" action="/decisions/{{ project.id }}/scenario">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+      <div class="card">
+        <div class="card__header">
+          <span class="card__title">Hypothèses personnalisées</span>
+          <span class="card__subtitle">Recalcul immédiat — aucune modification tant que vous ne validez pas</span>
+        </div>
+        <div class="card__body">
+          <p class="muted small" id="scenario-active-label">
+            Déplacez un curseur : les chiffres affichés sont recalculés par le moteur, rien n'est enregistré.
+          </p>
+          {% for key, label in param_labels.items() %}
+          <div class="slider-row">
+            <label class="field">
+              <span class="field__label">{{ label }}</span>
+              <input type="range" name="{{ key }}" data-param="{{ key }}"
+                     min="{{ -3 if key == 'lifetime_delta_years' else -50 }}"
+                     max="{{ 5 if key == 'lifetime_delta_years' else 50 }}"
+                     step="{{ 1 if key == 'lifetime_delta_years' else 5 }}" value="0">
+            </label>
+            <span class="slider-row__value" data-param-output="{{ key }}">0{% if key == 'lifetime_delta_years' %} an(s){% else %} %{% endif %}</span>
+          </div>
+          {% endfor %}
+          <div class="btn-row">
+            <button type="button" class="btn btn--small" id="sim-reset">Réinitialiser les hypothèses</button>
+            <button type="button" class="btn btn--small btn--primary" id="save-form-toggle">Enregistrer ce scénario</button>
+            <a class="btn btn--small btn--ghost" href="/simulations?project_id={{ project.id }}">Ouvrir dans les simulations</a>
+          </div>
+
+          <div id="save-form" hidden class="mt-1">
+            <div class="notice notice--info">
+              <strong class="notice__title">Enregistrer le scénario courant</strong>
+              <span class="notice__message">Les valeurs des curseurs seront enregistrées telles quelles, avec vos notes.</span>
+            </div>
+            <div class="form-grid">
+              <label class="field">
+                <span class="field__label">Nom du scénario</span>
+                <input type="text" id="sim-name" name="name" placeholder="Ex. : hausse du gasoil 2026">
+              </label>
+              <label class="field span-2">
+                <span class="field__label">Notes</span>
+                <textarea name="notes" rows="2" placeholder="Pourquoi ce scénario, quelles hypothèses…"></textarea>
+              </label>
+            </div>
+            <div class="btn-row">
+              <button type="submit" class="btn btn--small btn--primary">Enregistrer le scénario</button>
+            </div>
+          </div>
+        </div>
+      </div>
+    </form>
+
+    <div class="card">
+      <div class="card__header">
+        <span class="card__title">Scénarios enregistrés</span>
+        <span class="card__subtitle">{{ scenarios_saved | length }} scénario(s)</span>
+      </div>
+      {% if scenarios_saved %}
+      <div class="table-wrap">
+        <table class="data">
+          <thead>
+            <tr><th>Nom</th><th>Hypothèses</th><th>Notes</th><th>Créé le</th><th></th></tr>
+          </thead>
+          <tbody>
+            {% for scenario in scenarios_saved %}
+            <tr>
+              <td><strong>{{ scenario.name }}</strong>
+                <div class="muted small">{{ scenario_kinds.get(scenario.kind, scenario.kind) }}</div>
+              </td>
+              <td>
+                {% set parts = [] %}
+                {% for key, label in param_labels.items() %}
+                  {% set value = scenario.parameters.get(key) if scenario.parameters else 0 %}
+                  {% if value %}
+                    {% set _ = parts.append(label ~ " " ~ ("%+g" | format(value)) ~ (" an(s)" if key == 'lifetime_delta_years' else " %")) %}
+                  {% endif %}
+                {% endfor %}
+                {% if parts %}{{ parts | join(", ") }}{% else %}<span class="muted">Hypothèses de base (aucun écart)</span>{% endif %}
+              </td>
+              <td class="muted small">{{ scenario.notes or "—" }}</td>
+              <td class="nowrap">{{ scenario.created_at | datetimefr }}</td>
+              <td class="nowrap">
+                <form method="post" action="/decisions/{{ project.id }}/scenario/{{ scenario.id }}/delete"
+                      data-confirm="Supprimer ce scénario ?">
+                  <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+                  <button type="submit" class="btn btn--small btn--danger">Supprimer</button>
+                </form>
+              </td>
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+      {% else %}
+      <div class="card__body">
+        <p class="muted">Aucun scénario personnalisé enregistré pour ce projet.</p>
+      </div>
+      {% endif %}
+      <div class="card__footer muted small">
+        Un scénario est une hypothèse de travail explicite : « si le prix de l'énergie augmente de 15 % ».
+        Ce n'est jamais une prévision.
+      </div>
+    </div>
+
+  {% else %}
+    {{ sensitivity_panel(analysis) }}
+
+    <div class="card">
+      <div class="card__header"><span class="card__title">Comment lire cette page</span></div>
+      <div class="card__body">
+        <ul class="list-check">
+          <li><span>Chaque hypothèse est testée à ±10 % (ou ±1 an) autour de votre valeur saisie.</span></li>
+          <li><span>« Peut inverser le classement » signale une hypothèse à documenter en priorité.</span></li>
+          <li><span>Les écarts affichés restent des calculs sur vos données, jamais des prévisions de marché.</span></li>
+        </ul>
+      </div>
+    </div>
+  {% endif %}
+
+  <p class="muted small">
+    Comparaison interne, non certifiée : coûts saisis par vos équipes et émissions documentées (mesurées, calculées
+    ou estimées). Le coût par tonne évitée est un indicateur de compromis et non une économie garantie.
+  </p>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script src="/static/js/decision.js" defer></script>
+{% endblock %}

@@ -1,0 +1,246 @@
+{% extends "base.html" %}
+{% import "macros/ui.html" as ui %}
+{% block title %}Tableau de bord — {{ app_name }}{% endblock %}
+{% block page_title %}Tableau de bord{% endblock %}
+{% block page_subtitle %}<span class="muted small">{{ period_label }}{% if period.key != 'tout' %} — {{ period.start | datefr }} → {{ period.end | datefr }}{% else %} — toutes les données enregistrées{% endif %}</span>{% endblock %}
+
+{% block content %}
+
+<form class="card" method="get" action="/">
+  <div class="card__body">
+    <div class="filters">
+      <label class="field">
+        <span class="field__label">Période analysée</span>
+        <select name="period">
+          {% for key, label in period_presets.items() %}
+          <option value="{{ key }}" {% if key == period_choice %}selected{% endif %}>{{ label }}</option>
+          {% endfor %}
+        </select>
+      </label>
+      <label class="field">
+        <span class="field__label">Année</span>
+        <input type="number" name="year" min="2000" max="2100" value="{{ year_value }}">
+      </label>
+      <label class="field">
+        <span class="field__label">Mois (1-12)</span>
+        <input type="number" name="month" min="1" max="12" placeholder="—">
+      </label>
+      <label class="field">
+        <span class="field__label">Trimestre (1-4)</span>
+        <input type="number" name="quarter" min="1" max="4" placeholder="—">
+      </label>
+      <label class="field">
+        <span class="field__label">Début (période personnalisée)</span>
+        <input type="date" name="start">
+      </label>
+      <label class="field">
+        <span class="field__label">Fin</span>
+        <input type="date" name="end">
+      </label>
+      <div class="btn-row">
+        <button type="submit" class="btn btn--primary">Appliquer</button>
+      </div>
+    </div>
+  </div>
+</form>
+
+{% if empty_state %}
+  {{ ui.empty_state(
+      "Votre espace est prêt",
+      "Importez un fichier de dépenses, saisissez une première ligne ou chargez le jeu de démonstration pour voir les indicateurs se construire.",
+      "/imports",
+      "Importer un fichier de dépenses"
+  ) }}
+  <div class="btn-row">
+    <a class="btn" href="/expenses/new">Saisir une dépense</a>
+    <a class="btn" href="/decisions/new">Créer une comparaison de décisions</a>
+    <a class="btn btn--ghost" href="/settings?tab=donnees">Charger la démonstration</a>
+  </div>
+{% endif %}
+
+<div class="grid grid--4">
+  {{ ui.kpi("Dépenses HT — " ~ period_label, expense_summary.total_ht | money_compact,
+      expense_summary.count ~ " ligne(s)" ~ (" · TVA " ~ (expense_summary.total_vat | money_compact) if expense_summary.total_vat else ""),
+      "good" if not spend_evolution or spend_evolution <= 0 else "warn") }}
+  <div class="kpi kpi--info">
+    <div class="kpi__label">Évolution vs période précédente</div>
+    {% if spend_evolution is not none %}
+    <div class="kpi__value">{{ spend_evolution | pct(1, true) }}</div>
+    <div class="kpi__sub">Dépenses HT : {{ previous_expense_summary.total_ht | money_compact }} sur {{ period.previous_label }}</div>
+    {% else %}
+    <div class="kpi__value">—</div>
+    <div class="kpi__sub">Aucune période précédente comparable (données insuffisantes).</div>
+    {% endif %}
+  </div>
+  {{ ui.kpi("Émissions — " ~ period_label, emission_summary.total_t | tco2e,
+      emission_summary.record_count ~ " enregistrement(s) · estimé : " ~ (emission_summary.estimated_share_pct | pct),
+      "info") }}
+  <div class="kpi {{ 'warn' if expense_summary.unverified_count or expense_summary.without_factor_count else 'good' }}">
+    <div class="kpi__label">Qualité des données</div>
+    <div class="kpi__value">{{ expense_summary.unverified_count }} à vérifier</div>
+    <div class="kpi__sub">
+      {{ expense_summary.without_factor_count }} dépense(s) sans facteur d'émission
+      {% if expense_summary.without_factor_amount %} ({{ expense_summary.without_factor_amount | money_compact }}){% endif %}
+    </div>
+  </div>
+</div>
+
+<div class="grid grid--2 mt-2">
+  <div class="card">
+    <div class="card__header">
+      <span class="card__title">Dépenses par catégorie</span>
+      <span class="card__subtitle">HT — {{ period_label }}</span>
+    </div>
+    <div class="card__body">
+      {{ ui.chart_block(spend_chart, "Montants HT par catégorie (source : dépenses saisies ou importées).") }}
+    </div>
+    {% if spend_rows %}
+    <div class="table-wrap">
+      <table class="data">
+        <thead><tr><th>Catégorie</th><th class="num">Montant HT</th><th class="num">Part</th><th class="num">Lignes</th></tr></thead>
+        <tbody>
+          {% for row in spend_rows %}
+          <tr>
+            <td>{{ row.label }}</td>
+            <td class="num">{{ row.ht | mad }}</td>
+            <td class="num">{{ row.share_pct | pct }}</td>
+            <td class="num">{{ row.count }}</td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    {% endif %}
+  </div>
+
+  <div class="card">
+    <div class="card__header">
+      <span class="card__title">Émissions par poste</span>
+      <span class="card__subtitle">Quantité × facteur documenté</span>
+    </div>
+    <div class="card__body">
+      {{ ui.chart_block(emission_chart, "Émissions par poste, converties en tonnes de CO₂e.") }}
+      <div class="kv-strip mt-1">
+        <span><strong>{{ emission_summary.total_t | tco2e }}</strong> au total</span>
+        <span>Mesuré : {{ (emission_summary.measured_kg / 1000) | tco2e }}</span>
+        <span>Calculé : {{ (emission_summary.calculated_kg / 1000) | tco2e }}</span>
+        <span>Estimé : {{ (emission_summary.estimated_kg / 1000) | tco2e }} ({{ emission_summary.estimated_share_pct | pct }})</span>
+      </div>
+    </div>
+    {% if emission_rows %}
+    <div class="table-wrap">
+      <table class="data">
+        <thead><tr><th>Poste</th><th class="num">Émissions</th><th class="num">Part</th></tr></thead>
+        <tbody>
+          {% for row in emission_rows %}
+          <tr>
+            <td>{{ row.label }}</td>
+            <td class="num">{{ (row.kg / 1000) | tco2e }}</td>
+            <td class="num">{{ row.share_pct | pct }}</td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    {% endif %}
+  </div>
+</div>
+
+<div class="grid grid--sidebar mt-2">
+  <div>
+    <div class="card">
+      <div class="card__header">
+        <span class="card__title">Décisions récentes</span>
+        <a class="btn btn--small" href="/decisions">Tout voir</a>
+      </div>
+      {% if recent_projects %}
+      <div class="table-wrap">
+        <table class="data">
+          <thead>
+            <tr><th>Projet</th><th>Priorité</th><th>Statut</th><th class="num">Options</th><th>Mis à jour</th></tr>
+          </thead>
+          <tbody>
+            {% for project in recent_projects %}
+            <tr>
+              <td>
+                <a href="/decisions/{{ project.id }}">{{ project.title }}</a> {{ ui.demo_badge(project.is_demo) }}
+              </td>
+              <td>{{ priorities.get(project.priority, project.priority) }}</td>
+              <td>{{ ui.badge(project.status, project_statuses.get(project.status, project.status)) }}</td>
+              <td class="num">{{ project.options | length }}</td>
+              <td class="nowrap">{{ project.updated_at | datefr }}</td>
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+      {% else %}
+      <div class="card__body">
+        <p class="muted">Aucun projet de comparaison pour le moment. Le comparateur est le cœur de l'application :
+        comparez au moins deux options (fournisseurs, équipements, scénarios d'investissement).</p>
+        <a class="btn btn--primary" href="/decisions/new">Créer une comparaison</a>
+      </div>
+      {% endif %}
+    </div>
+
+    <div class="card">
+      <div class="card__header">
+        <span class="card__title">Opportunités d'économie déclarées</span>
+        <span class="card__subtitle">{{ projects_count }} projet(s) · {{ saved_projects_count }} enregistré(s)</span>
+      </div>
+      {% if opportunities %}
+      <div class="table-wrap">
+        <table class="data">
+          <thead><tr><th>Option</th><th>Projet</th><th>Fournisseur</th><th class="num">Économies annuelles déclarées</th></tr></thead>
+          <tbody>
+            {% for row in opportunities %}
+            <tr>
+              <td>{{ row.option_name }}</td>
+              <td><a href="/decisions/{{ row.project_id }}">{{ row.project_title }}</a> {{ ui.demo_badge(row.is_demo) }}</td>
+              <td>{{ row.supplier or "—" }}</td>
+              <td class="num">{{ row.annual_savings | mad }}</td>
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+      <div class="card__footer muted small">
+        Économies déclarées dans les options des projets : ce sont des données saisies, à confirmer par le réalisé.
+        Une réduction d'émissions n'est pas une économie financière automatique.
+      </div>
+      {% else %}
+      <div class="card__body"><p class="muted">Aucune économie annuelle déclarée dans vos projets de décision.</p></div>
+      {% endif %}
+    </div>
+  </div>
+
+  <div>
+    <div class="card">
+      <div class="card__header"><span class="card__title">Actions rapides</span></div>
+      <div class="card__body">
+        <div class="btn-row" style="flex-direction: column; align-items: stretch;">
+          <a class="btn btn--primary btn--block" href="/imports">Importer des dépenses (CSV / Excel)</a>
+          <a class="btn btn--block" href="/expenses/new">Saisir une dépense</a>
+          <a class="btn btn--block" href="/carbon/new">Saisir une donnée carbone</a>
+          <a class="btn btn--block" href="/decisions/new">Comparer deux options</a>
+          <a class="btn btn--block" href="/reports">Générer un rapport</a>
+        </div>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="card__header"><span class="card__title">Méthode appliquée</span></div>
+      <div class="card__body">
+        <ul class="list-check">
+          <li><span>Émissions = quantité d'activité × facteur documenté</span></li>
+          <li><span>Coût total = acquisition + transport + Σ coûts annuels − économies</span></li>
+          <li><span>Coût par t CO₂e évitée = écart de coût ÷ écart d'émissions</span></li>
+          <li><span>Aucun facteur d'émission attribué automatiquement</span></li>
+          <li><span>Prix interne du carbone : hypothèse de décision, jamais une charge comptable</span></li>
+        </ul>
+        <p class="muted small mt-1">Rapports de gestion interne non certifiés.</p>
+      </div>
+    </div>
+  </div>
+</div>
+{% endblock %}

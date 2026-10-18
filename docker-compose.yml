@@ -1,0 +1,52 @@
+# CarbonLedger AI — exécution conteneurisée (application + PostgreSQL).
+#
+#   export CARBONLEDGER_SECRET_KEY="$(python -c 'import secrets;print(secrets.token_urlsafe(48))')"
+#   docker compose up -d --build
+#   docker compose exec app alembic upgrade head
+#   docker compose exec app python scripts/seed_demo.py --email demo@carbonledger.ma --password DemoCarbon2026
+#
+# Sans PostgreSQL, commentez le service `db` et la variable CARBONLEDGER_DATABASE_URL
+# (SQLite sera utilisé dans le volume `carbonledger-data`).
+
+services:
+  app:
+    build: .
+    image: carbonledger:latest
+    restart: unless-stopped
+    ports:
+      - "8000:8000"
+    environment:
+      CARBONLEDGER_ENV: production
+      CARBONLEDGER_SECRET_KEY: ${CARBONLEDGER_SECRET_KEY:?Définir CARBONLEDGER_SECRET_KEY}
+      CARBONLEDGER_BASE_URL: ${CARBONLEDGER_BASE_URL:-http://localhost:8000}
+      CARBONLEDGER_DATABASE_URL: postgresql+psycopg://carbonledger:${POSTGRES_PASSWORD:-carbonledger}@db:5432/carbonledger
+      CARBONLEDGER_DATA_DIR: /data
+      CARBONLEDGER_COOKIE_SECURE: ${CARBONLEDGER_COOKIE_SECURE:-false}
+      CARBONLEDGER_AI_API_KEY: ${CARBONLEDGER_AI_API_KEY:-}
+      CARBONLEDGER_AI_BASE_URL: ${CARBONLEDGER_AI_BASE_URL:-https://api.openai.com/v1}
+      CARBONLEDGER_AI_MODEL: ${CARBONLEDGER_AI_MODEL:-gpt-4o-mini}
+    volumes:
+      - carbonledger-data:/data
+    depends_on:
+      db:
+        condition: service_healthy
+
+  db:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: carbonledger
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-carbonledger}
+      POSTGRES_DB: carbonledger
+      POSTGRES_INITDB_ARGS: "--encoding=UTF8"
+    volumes:
+      - carbonledger-db:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U carbonledger -d carbonledger"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+volumes:
+  carbonledger-data:
+  carbonledger-db:

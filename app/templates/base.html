@@ -1,0 +1,147 @@
+{# Gabarit principal : navigation, en-tête, messages flash et pied de page. #}
+{% import "macros/ui.html" as ui %}
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  {% if csrf_token is defined and csrf_token %}<meta name="csrf-token" content="{{ csrf_token }}">{% endif %}
+  <title>{% block title %}{{ app_name }}{% endblock %}</title>
+  <link rel="stylesheet" href="/static/css/app.css">
+  {% block head %}{% endblock %}
+</head>
+{% set is_app = ctx is defined and ctx %}
+<body class="{{ 'app' if is_app else 'guest' }}">
+
+{% set flashes = flash_messages | default([]) %}
+{% if is_app %}
+<div class="shell">
+  <aside class="sidebar" id="sidebar">
+    <div class="sidebar__brand">
+      <span class="brand-mark" aria-hidden="true">CL</span>
+      <div>
+        <div class="brand-name">{{ app_name }}</div>
+        <div class="brand-sub">Pilotage coûts &amp; carbone</div>
+      </div>
+    </div>
+    <nav class="nav" aria-label="Navigation principale">
+      {% set current = active | default('') %}
+      {% for key, label, icon in nav_items %}
+      <a class="nav__item {% if key == current %}nav__item--active{% endif %}" href="{{ '/' if key == 'dashboard' else '/' ~ key }}"
+         {% if key == current %}aria-current="page"{% endif %}>
+        <span class="nav__icon" aria-hidden="true">{{ icon }}</span>
+        <span class="nav__label">{{ label }}</span>
+        {% if key == 'copilot' and not (ai_configured | default(false)) %}<span class="nav__tag">démo</span>{% endif %}
+      </a>
+      {% endfor %}
+    </nav>
+    <div class="sidebar__footer">
+      <a class="nav__item nav__item--sub" href="/imports"><span class="nav__icon" aria-hidden="true">⇪</span><span class="nav__label">Importer un fichier</span></a>
+      <div class="sidebar__org">
+        <div class="sidebar__org-name">{{ ctx.organization.name }}</div>
+        <div class="sidebar__org-meta">{{ ctx.user.full_name or ctx.user.email }} · {{ member_roles.get(ctx.role, ctx.role) }}</div>
+      </div>
+    </div>
+  </aside>
+
+  <div class="main">
+    <header class="topbar">
+      <div class="topbar__left">
+        <div class="topbar__title">
+          <h1>{% block page_title %}{{ app_name }}{% endblock %}</h1>
+          {% block page_subtitle %}{% endblock %}
+        </div>
+      </div>
+      <div class="topbar__right">
+        {% if ctx.organization.demo_data_loaded %}<span class="badge badge--demo" title="Des données de démonstration sont chargées dans cette organisation">Données de démonstration</span>{% endif %}
+        {% if not (ai_configured | default(false)) %}<span class="badge badge--muted" title="Aucune clé API : le Copilot répond en mode démonstration déterministe">IA non configurée</span>{% endif %}
+        {% set notes = notifications | default([]) %}
+        <details class="dropdown">
+          <summary class="dropdown__toggle" aria-label="Notifications">
+            <span aria-hidden="true">🔔</span>
+            {% if notes %}<span class="dropdown__count">{{ notes | length }}</span>{% endif %}
+          </summary>
+          <div class="dropdown__menu dropdown__menu--wide">
+            <div class="dropdown__header">Notifications</div>
+            {% for note in notes %}
+            <a class="notif notif--{{ note.level }}" href="{{ note.href }}">
+              <span class="notif__title">{{ note.title }}</span>
+              <span class="notif__message">{{ note.message }}</span>
+            </a>
+            {% else %}
+            <div class="dropdown__empty">Aucune alerte pour le moment.</div>
+            {% endfor %}
+            <a class="dropdown__footer-link" href="/settings?tab=audit">Journal d'activité</a>
+          </div>
+        </details>
+        <details class="dropdown">
+          <summary class="dropdown__toggle dropdown__toggle--user">
+            <span class="avatar" aria-hidden="true">{{ (ctx.user.full_name or ctx.user.email)[:1] | upper }}</span>
+            <span class="dropdown__user-name">{{ ctx.user.full_name or ctx.user.email }}</span>
+          </summary>
+          <div class="dropdown__menu">
+            <div class="dropdown__header">{{ ctx.user.email }}</div>
+            <a class="dropdown__item" href="/settings">Paramètres de l'organisation</a>
+            <a class="dropdown__item" href="/settings?tab=donnees">Données et export</a>
+            <a class="dropdown__item" href="/copilot">Assistant IA</a>
+            <form method="post" action="/logout" class="dropdown__form">
+              <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+              <button type="submit" class="dropdown__item dropdown__item--danger">Se déconnecter</button>
+            </form>
+          </div>
+        </details>
+      </div>
+    </header>
+
+    <main class="content">
+      {% if flashes %}
+      <div class="flashes" role="status">
+        {% for message in flashes %}
+        <div class="flash flash--{{ message.level }}" data-flash>
+          <span class="flash__text">{{ message.message }}</span>
+          <button type="button" class="flash__close" data-dismiss aria-label="Fermer">×</button>
+        </div>
+        {% endfor %}
+      </div>
+      {% endif %}
+
+{% else %}
+<div class="guest-wrap">
+  <div class="guest-card">
+    <div class="guest-brand">
+      <span class="brand-mark" aria-hidden="true">CL</span>
+      <div>
+        <div class="brand-name">{{ app_name }}</div>
+        <div class="brand-sub">Pilotage coûts &amp; carbone pour PME marocaines</div>
+      </div>
+    </div>
+    {% if flashes %}
+    <div class="flashes" role="status">
+      {% for message in flashes %}
+      <div class="flash flash--{{ message.level }}" data-flash><span class="flash__text">{{ message.message }}</span></div>
+      {% endfor %}
+    </div>
+    {% endif %}
+{% endif %}
+
+{% block content %}{% endblock %}
+
+{% if is_app %}
+    </main>
+
+    <footer class="footer">
+      <span>{{ app_name }} v{{ app_version }} — devise : MAD (DH).</span>
+      <span>Rapports de gestion interne non certifiés : les estimations carbone sont explicitées, jamais inventées.</span>
+    </footer>
+  </div>
+</div>
+{% else %}
+  </div>
+  <p class="guest-foot">CarbonLedger AI — aide à la décision interne. Les calculs sont vérifiables et les sources documentées.</p>
+</div>
+{% endif %}
+
+<script src="/static/js/app.js" defer></script>
+{% block scripts %}{% endblock %}
+</body>
+</html>

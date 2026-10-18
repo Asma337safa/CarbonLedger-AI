@@ -1,0 +1,77 @@
+{% extends "base.html" %}
+{% block title %}Bienvenue — {{ app_name }}{% endblock %}
+{% block page_title %}Bienvenue dans {{ app_name }}{% endblock %}
+{% block page_subtitle %}<span class="muted small">Trois minutes pour configurer votre espace</span>{% endblock %}
+
+{% block content %}
+<div class="grid grid--2">
+  <div class="card">
+    <div class="card__header"><span class="card__title">1. Votre entreprise</span></div>
+    <div class="card__body">
+      <p class="muted">Ces informations figurent sur vos rapports de gestion.</p>
+      <form method="post" action="/onboarding">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+        <div class="form-grid" style="grid-template-columns: 1fr;">
+          <label class="field">
+            <span class="field__label">Secteur d'activité</span>
+            <input type="text" name="sector" value="{{ ctx.organization.sector }}" placeholder="Ex. agroalimentaire, textile, logistique…">
+          </label>
+          <label class="field">
+            <span class="field__label">Taille de l'entreprise</span>
+            <input type="text" name="company_size" value="{{ ctx.organization.company_size }}" placeholder="Ex. 10-50 salariés">
+          </label>
+        </div>
+        <div class="btn-row mt-2">
+          <button type="submit" class="btn btn--primary" name="action" value="skip">Enregistrer et continuer</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <div class="card">
+    <div class="card__header"><span class="card__title">2. Premier jeu de données</span></div>
+    <div class="card__body">
+      <p>Vous pouvez charger un jeu de <strong>démonstration complet</strong> : dépenses, registre carbone et
+        un projet de comparaison conforme à l'exemple de référence (200 000 DH vs 180 000 DH, 25 t CO₂e évitées).</p>
+      <div class="notice notice--info">
+        <strong class="notice__title">Données de démonstration clairement identifiées</strong>
+        <span class="notice__message">Chaque ligne porte un badge « Démo » et peut être supprimée en un clic depuis les Paramètres.
+        Aucune donnée réelle n'est inventée : rien n'est calculé sans valeurs saisies.</span>
+      </div>
+      <form method="post" action="/onboarding">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+        <input type="hidden" name="sector" value="{{ ctx.organization.sector }}">
+        <input type="hidden" name="company_size" value="{{ ctx.organization.company_size }}">
+        <div class="btn-row">
+          <button type="submit" class="btn btn--secondary" name="action" value="demo">Charger la démonstration</button>
+          <button type="submit" class="btn" name="action" value="skip">Commencer avec mes propres données</button>
+        </div>
+      </form>
+    </div>
+  </div>
+</div>
+
+<div class="card">
+  <div class="card__header"><span class="card__title">3. Ce que vous pourrez faire ensuite</span></div>
+  <div class="card__body">
+    <div class="grid grid--4">
+      <div>
+        <h3>Saisir ou importer</h3>
+        <p class="muted small">Dépenses manuelles ou import CSV / Excel en quatre étapes (contrôles et doublons détectés).</p>
+      </div>
+      <div>
+        <h3>Compter le carbone</h3>
+        <p class="muted small">Quantité × facteur d'émission documenté (source, périmètre, validité). Aucun facteur attribué automatiquement.</p>
+      </div>
+      <div>
+        <h3>Comparer les décisions</h3>
+        <p class="muted small">Coûts cumulés, émissions cumulées et coût par tonne de CO₂e évitée, avec arbitrage explicable.</p>
+      </div>
+      <div>
+        <h3>Simuler et rapporter</h3>
+        <p class="muted small">Scénarios optimiste / défavorable / personnalisés, PDF et exports CSV / Excel.</p>
+      </div>
+    </div>
+  </div>
+</div>
+{% endblock %}

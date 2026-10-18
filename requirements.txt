@@ -1,0 +1,12 @@
+# CarbonLedger AI — dépendances Python (application full-stack)
+fastapi>=0.110
+uvicorn[standard]>=0.29
+jinja2>=3.1
+sqlalchemy>=2.0
+psycopg[binary]>=3.1   # pilote PostgreSQL (production) ; inutile en SQLite local
+python-multipart>=0.0.9
+reportlab>=4.0
+openpyxl>=3.1
+httpx>=0.27
+pytest>=8.0
+alembic>=1.13

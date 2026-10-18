@@ -1,0 +1,176 @@
+{% extends "base.html" %}
+{% import "macros/ui.html" as ui %}
+{% block title %}Rapports — {{ app_name }}{% endblock %}
+{% block page_title %}Rapports et exports{% endblock %}
+{% block page_subtitle %}
+<span class="muted small">
+  Rapports de gestion interne, non certifiés : chaque chiffre est repris des données saisies et
+  des facteurs documentés, avec leur source.
+</span>
+{% endblock %}
+
+{% block content %}
+
+<div class="grid grid--sidebar">
+  <div>
+    <div class="card">
+      <div class="card__header">
+        <span class="card__title">Générer un rapport</span>
+        <span class="card__subtitle">PDF pour un rapport complet · Excel pour retravailler les données</span>
+      </div>
+      <div class="card__body">
+        <form method="post" action="/reports/generate">
+          <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+          <div class="form-grid">
+            <label class="field">
+              <span class="field__label">Périmètre du rapport</span>
+              <select name="scope">
+                <option value="periode">Synthèse de gestion sur une période</option>
+                <option value="projet">Dossier de décision (un projet)</option>
+              </select>
+            </label>
+            <label class="field">
+              <span class="field__label">Format de sortie</span>
+              <select name="output">
+                <option value="pdf">PDF (rapport mis en forme)</option>
+                <option value="xlsx">Excel (.xlsx) — période uniquement</option>
+              </select>
+            </label>
+            <label class="field">
+              <span class="field__label">Période analysée</span>
+              <select name="period">
+                {% for key, label in period_presets.items() %}
+                <option value="{{ key }}" {% if key == 'annee' %}selected{% endif %}>{{ label }}</option>
+                {% endfor %}
+              </select>
+              <span class="field__help">Utilisée pour la synthèse de gestion et l'export Excel.</span>
+            </label>
+            <label class="field">
+              <span class="field__label">Début (période personnalisée)</span>
+              <input type="date" name="start">
+            </label>
+            <label class="field">
+              <span class="field__label">Fin (période personnalisée)</span>
+              <input type="date" name="end">
+            </label>
+            <label class="field span-2">
+              <span class="field__label">Projet de décision (dossier de décision)</span>
+              <select name="project_id">
+                <option value="">— Choisir un projet —</option>
+                {% for project in projects %}
+                <option value="{{ project.id }}">
+                  {{ project.title }} — {{ project.options | length }} option(s), horizon {{ project.horizon_years }} ans
+                </option>
+                {% endfor %}
+              </select>
+            </label>
+          </div>
+          <div class="btn-row mt-1">
+            <button type="submit" class="btn btn--primary">Générer le rapport</button>
+          </div>
+          <p class="muted small mt-1">
+            Le dossier de décision reprend les résultats, l'arbitrage expliqué, les scénarios et la sensibilité du
+            projet avec ses hypothèses. Il est produit uniquement en PDF.
+          </p>
+        </form>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="card__header">
+        <span class="card__title">Rapports générés</span>
+        <span class="card__subtitle">{{ reports | length }} document(s) · les 50 derniers</span>
+      </div>
+      {% if reports %}
+      <div class="table-wrap">
+        <table class="data">
+          <thead>
+            <tr>
+              <th>Rapport</th><th>Type</th><th>Périmètre</th><th>Période</th><th>Créé le</th><th></th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for report in reports %}
+            <tr>
+              <td>
+                <strong>{{ report.title }}</strong>
+                {% if report.project %}<div class="muted small">Projet : {{ report.project.title }}</div>{% endif %}
+              </td>
+              <td>{{ report.kind | upper }}</td>
+              <td>{{ "Période" if report.scope == 'periode' else ("Projet" if report.scope == 'projet' else "Global") }}</td>
+              <td class="nowrap">
+                {% if report.period_start and report.period_end %}
+                  {{ report.period_start | datefr }} → {{ report.period_end | datefr }}
+                {% else %}—{% endif %}
+              </td>
+              <td class="nowrap">{{ report.created_at | datetimefr }}</td>
+              <td class="nowrap">
+                <div class="table-actions">
+                  <a class="btn btn--small" href="/reports/{{ report.id }}/download">Télécharger</a>
+                  <form method="post" action="/reports/{{ report.id }}/delete"
+                        data-confirm="Supprimer ce rapport et son fichier ?">
+                    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+                    <button type="submit" class="btn btn--small btn--danger">Supprimer</button>
+                  </form>
+                </div>
+              </td>
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+      {% else %}
+      <div class="card__body">
+        <p class="muted">
+          Aucun rapport généré pour le moment. Choisissez un périmètre ci-dessus : une synthèse de gestion
+          sur une période ou le dossier complet d'un projet de décision.
+        </p>
+      </div>
+      {% endif %}
+    </div>
+  </div>
+
+  <div>
+    <div class="card">
+      <div class="card__header"><span class="card__title">Ce que contient un rapport</span></div>
+      <div class="card__body">
+        <ul class="list-check">
+          <li><span>Totaux de dépenses HT, TVA et poids par catégorie</span></li>
+          <li><span>Émissions par poste, distinguées entre mesuré, calculé et estimé</span></li>
+          <li><span>Liste des facteurs d'émission utilisés et leurs sources</span></li>
+          <li><span>Projets de décision, options, coût total et coût par tonne évitée</span></li>
+        </ul>
+        <p class="muted small mt-1">
+          Les dépenses sans facteur d'émission sont comptées dans les montants, mais leur carbone n'est pas estimé :
+          le rapport le signale explicitement.
+        </p>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="card__header"><span class="card__title">Exports directs</span></div>
+      <div class="card__body">
+        <div class="btn-row" style="flex-direction: column; align-items: stretch;">
+          <a class="btn btn--block" href="/settings/export.json">Export JSON complet (portabilité)</a>
+          <a class="btn btn--block" href="/decisions">Exports CSV par projet de décision</a>
+        </div>
+        <p class="muted small mt-1">
+          L'export JSON contient les dépenses, le registre carbone, les décisions et les facteurs utilisés :
+          il sert de sauvegarde et de base de dialogue avec votre comptable ou votre auditeur.
+        </p>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="card__header"><span class="card__title">Limites à connaître</span></div>
+      <div class="card__body">
+        <p class="muted small">
+          Ces documents sont des outils de pilotage interne. Ils ne remplacent ni une comptabilité certifiée,
+          ni un bilan carbone réglementaire vérifié par un tiers.
+        </p>
+      </div>
+    </div>
+  </div>
+</div>
+
+{% endblock %}

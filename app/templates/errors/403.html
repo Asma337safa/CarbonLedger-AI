@@ -1,0 +1,24 @@
+{% extends "base.html" %}
+{% block title %}Accès refusé — {{ app_name }}{% endblock %}
+
+{% block content %}
+<div class="empty">
+  <div class="empty__icon" aria-hidden="true">⛔</div>
+  <h2 class="empty__title">Accès refusé</h2>
+  <p class="empty__message">
+    {{ message | default("Votre rôle ne permet pas cette action.") }}
+  </p>
+  <p class="muted small">
+    Chaque organisation ne voit que ses propres données : les actions sont contrôlées côté serveur.
+    Demandez à un propriétaire ou un administrateur de votre espace si vous avez besoin de ce droit.
+  </p>
+  <div class="btn-row">
+    <a class="btn btn--primary" href="/">Retour au tableau de bord</a>
+    {% if csrf_token is defined and csrf_token %}
+    <a class="btn" href="/settings">Consulter mes paramètres</a>
+    {% else %}
+    <a class="btn" href="/login">Se connecter</a>
+    {% endif %}
+  </div>
+</div>
+{% endblock %}
